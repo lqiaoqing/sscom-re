@@ -221,6 +221,19 @@ public sealed class MainForm : Form
     {
         if (_relayoutScheduled || !IsHandleCreated) return;
         _relayoutScheduled = true;
+        BeginInvoke(new Action(() =>
+        {
+            _relayoutScheduled = false;
+            if (_rootLayout is null || _toolBar is null || _bottomGrid is null) return;
+            int toolbarHeight = Math.Max(LineHeight(), _toolBar.Height);
+            int bottomHeight = BottomContentHeight() + 4;
+            RowStyle toolbarRow = _rootLayout.RowStyles[2];
+            if (Math.Abs(toolbarRow.Height - toolbarHeight) > 0.5f) toolbarRow.Height = toolbarHeight;
+            RowStyle bottomRow = _rootLayout.RowStyles[3];
+            if (Math.Abs(bottomRow.Height - bottomHeight) > 0.5f) bottomRow.Height = bottomHeight;
+            _rootLayout.PerformLayout();
+            UpdateMinimumHeight();
+        }));
     }
 
     private void UpdateMinimumHeight()
@@ -247,28 +260,6 @@ public sealed class MainForm : Form
             _updatingMin = false;
         }
     }
-
-    private void UpdateBottomGridRows()
-    {
-        if (_bottomGrid is null || _settingsRow1 is null || _settingsRow2 is null) return;
-        int h0 = Math.Max(LineHeight(), _settingsRow1.Height);
-        int h1 = Math.Max(LineHeight(), _settingsRow2.Height);
-        int h2 = LineHeight() + 2;
-        SetGridRowHeight(0, h0);
-        SetGridRowHeight(1, h1);
-        UpdateBottomBandHeight();
-    }
-
-    private void SetGridRowHeight(int row, int height)
-    {
-        RowStyle style = _bottomGrid.RowStyles[row];
-        if (Math.Abs(style.Height - height) > 0.5f) style.Height = height;
-    }
-
-    private int BottomContentHeight() =>
-        (_settingsRow1 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow1.Height))
-        + (_settingsRow2 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow2.Height))
-        + (LineHeight() + 2) * 2;
 
     private void UpdateBottomBandHeight()
     {
@@ -450,6 +441,25 @@ public sealed class MainForm : Form
         _bottomGrid.ColumnStyles[0].Width = Math.Max(240, need + 6);
     }
 
+    private void UpdateBottomGridRows()
+    {
+        if (_bottomGrid is null || _settingsRow1 is null || _settingsRow2 is null) return;
+        SetGridRowHeight(0, Math.Max(LineHeight(), _settingsRow1.Height));
+        SetGridRowHeight(1, Math.Max(LineHeight(), _settingsRow2.Height));
+        UpdateBottomBandHeight();
+    }
+
+    private void SetGridRowHeight(int row, int height)
+    {
+        RowStyle style = _bottomGrid.RowStyles[row];
+        if (Math.Abs(style.Height - height) > 0.5f) style.Height = height;
+    }
+
+    private int BottomContentHeight() =>
+        (_settingsRow1 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow1.Height))
+        + (_settingsRow2 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow2.Height))
+        + (LineHeight() + 2) * 2;
+
     private static int FlowContentWidth(FlowLayoutPanel row, bool onlyVisible = true)
     {
         int w = row.Padding.Horizontal;
@@ -458,6 +468,388 @@ public sealed class MainForm : Form
                 w += c.Width + c.Margin.Horizontal;
         return w;
     }
+
+    private static int MaxRowWidth(Control? root, bool onlyVisible = true)
+    {
+        if (root is null) return 0;
+        int max = 0;
+        foreach (Control child in root.Controls)
+            if (child is FlowLayoutPanel row)
+                max = Math.Max(max, FlowContentWidth(row, onlyVisible));
+        return max;
+    }
+
+    private FlowLayoutPanel[] BuildSerialRows()
+    {
+        int unit = TextUnit();
+        _portCombo = new ComboBox { Width = unit * 10, DropDownStyle = ComboBoxStyle.DropDown };
+        _openButton = new Button { Text = "打开串口", AutoSize = true };
+        _baudCombo = new ComboBox { Width = unit * 7, DropDownStyle = ComboBoxStyle.DropDownList };
+        foreach (var b in ComPortService.BaudItems) _baudCombo.Items.Add(b);
+        _baudCombo.SelectedIndex = 13; // 115200
+        _customBaudBox = new TextBox { Width = unit * 6, Text = _port.CustomBaud.ToString(), Visible = false };
+        _customBaudBox.VisibleChanged += (_, _) => UpdateLeftColumnWidth();
+        _rtsBox = new CheckBox { Text = "RTS", AutoSize = true };
+        _dtrBox = new CheckBox { Text = "DTR", AutoSize = true };
+        _moreSettingsButton = new Button { Text = "更多串口设置", AutoSize = true };
+        _moreSettingsButton.Click += (_, _) => ShowPortSettings();
+
+        var row1 = MakeTopLine();
+        Put(row1, new Label { Text = "端口号", AutoSize = true });
+        Put(row1, _portCombo);
+
+        var row2 = MakeTopLine();
+        Put(row2, _openButton);
+        var refresh = new Button { Text = "↻", AutoSize = true };
+        refresh.Click += (_, _) => RefreshPortList();
+        _rowTip.SetToolTip(refresh, "刷新串口列表");
+        Put(row2, refresh);
+        Put(row2, _moreSettingsButton);
+
+        var row3 = MakeTopLine();
+        Put(row3, _rtsBox);
+        Put(row3, _dtrBox);
+        Put(row3, new Label { Text = "波特率", AutoSize = true });
+        Put(row3, _baudCombo);
+        Put(row3, _customBaudBox);
+        return [row1, row2, row3];
+    }
+
+    private FlowLayoutPanel[] BuildNetRows()
+    {
+        int unit = TextUnit();
+        Label Lb(string text) => new() { Text = text, AutoSize = true };
+        _remoteIpBox = new TextBox { Width = unit * 12 };
+        _remotePortBox = new TextBox { Width = unit * 6, Text = "8080" };
+        _localIpCombo = new ComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDown };
+        _localPortBox = new TextBox { Width = unit * 6, Text = "8080" };
+        _connectButton = new Button { Text = "连接", AutoSize = true };
+        _disconnectButton = new Button { Text = "断开", AutoSize = true };
+        _connectButton.Click += (_, _) => ConnectNetwork();
+        _disconnectButton.Click += (_, _) => DisconnectNetwork();
+
+        var row1 = MakeTopLine();
+        Put(row1, Lb("远程"));
+        Put(row1, _remoteIpBox);
+        Put(row1, Lb("端口"));
+        Put(row1, _remotePortBox);
+        var row2 = MakeTopLine();
+        Put(row2, Lb("本地"));
+        Put(row2, _localIpCombo);
+        Put(row2, Lb("端口"));
+        Put(row2, _localPortBox);
+        var row3 = MakeTopLine();
+        Put(row3, _connectButton);
+        Put(row3, _disconnectButton);
+        return [row1, row2, row3];
+    }
+
+    private Control BuildToolBar()
+    {
+        var panel = MakeWrapLine();
+        Put(panel, ActionButton("清除窗口", ClearReceive));
+        Put(panel, ActionButton("打开文件", OpenFile));
+        _filePathBox = new TextBox { Width = TextUnit() * 12, ReadOnly = true, BackColor = SystemColors.Window };
+        Put(panel, _filePathBox);
+        panel.StretchControl = _filePathBox;
+
+        panel.MarkRightGroup();
+        _sendFileButton = ActionButton("发送文件", SendFile);
+        Put(panel, _sendFileButton);
+        Put(panel, ActionButton("停止", StopSendFile));
+        Put(panel, ActionButton("清发送区", () => _sendBox.Clear()));
+        _topmostBox = new CheckBox { Text = "最前", AutoSize = true };
+        Put(panel, _topmostBox);
+        Put(panel, ActionButton("保存参数", SaveConfig));
+        _hideToggleButton = ActionButton("扩展", ToggleMultiPanel);
+        _collapseButton = ActionButton("━", ToggleBottomPanels);
+        Put(panel, _hideToggleButton);
+        Put(panel, _collapseButton);
+        return panel;
+    }
+
+    private WrapRowPanel BuildOptionsRow()
+    {
+        var row = MakeWrapLine();
+        CheckBox Cb(string text, bool @checked = false) =>
+            new() { Text = text, AutoSize = true, Checked = @checked };
+        Label Lb(string text) => new() { Text = text, AutoSize = true };
+        int unit = TextUnit();
+
+        _hexDisplayBox = Cb("HEX显示");
+        Put(row, _hexDisplayBox);
+        Put(row, ActionButton("保存数据", SaveData));
+        _recvToFileBox = Cb("接收数据到文件");
+        Put(row, _recvToFileBox);
+        _hexSendBox = Cb("HEX发送");
+        _timerSendBox = Cb("定时发送:");
+        _timerIntervalEdit = new TextBox { Text = "1000", Width = unit * 4 };
+        _newLineBox = Cb("加回车换行");
+        Put(row, MakeGroup(_hexSendBox, _timerSendBox, _timerIntervalEdit, Lb("ms/次"), _newLineBox));
+        return row;
+    }
+
+    private WrapRowPanel BuildVerifyRow()
+    {
+        var row = MakeWrapLine();
+        Label Lb(string text) => new() { Text = text, AutoSize = true };
+        int unit = TextUnit();
+
+        _timestampBox = new CheckBox { Text = "加时间戳和分包显示", AutoSize = true, Checked = true };
+        Put(row, _timestampBox);
+        _timeoutLabel = Lb("超时时间:");
+        Put(row, _timeoutLabel);
+        _timeoutEdit = new TextBox { Text = "20", Width = unit * 4 };
+        Put(row, _timeoutEdit);
+        Put(row, Lb("ms"));
+        Put(row, Lb("第"));
+        _verifyNumEdit = new TextBox { Text = "1", Width = unit * 3 };
+        Put(row, _verifyNumEdit);
+        Put(row, Lb("字节至"));
+        _tailCombo = new ComboBox { Width = unit * 14, DropDownWidth = unit * 42, DropDownStyle = ComboBoxStyle.DropDownList };
+        _tailCombo.Items.AddRange(new object[]
+        {
+            "末尾 (无帧尾字节)",
+            "第-1 (最后1个字节是帧尾,校验插在帧尾前面)",
+            "第-2 (最后2个字节是帧尾,校验插在帧尾前面)",
+            "第-3 (最后3个字节是帧尾,校验插在帧尾前面)",
+            "第-4 (最后4个字节是帧尾,校验插在帧尾前面)",
+        });
+        _tailCombo.SelectedIndex = 0;
+        Put(row, _tailCombo);
+        Put(row, Lb("加校验"));
+        _verifyBox = new ComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDownList };
+        _verifyBox.Items.AddRange(new object[] { "None", "ModbusCRC16", "CCITT-CRC16", "CRC32", "0-ADD8", "ADD8", "XOR8", "ADD16" });
+        _verifyBox.SelectedIndex = 0;
+        Put(row, _verifyBox);
+        _crcBox = new TextBox { Width = unit * 8, ReadOnly = true, TabStop = false };
+        Put(row, _crcBox);
+        return row;
+    }
+
+    /// <summary>单行，不换行。控件保持自身宽度，避免把「加时间戳」拆成两行。</summary>
+    private FlowLayoutPanel MakeLine() => new RowFlowPanel
+    {
+        Dock = DockStyle.Fill,
+        WrapContents = false,
+        AutoSize = false,
+        FlowDirection = FlowDirection.LeftToRight,
+        Margin = new Padding(0),
+        Padding = new Padding(2, 1, 2, 0),
+    };
+
+    /// <summary>可换行的一行：宽度不够时自动折到下一行，高度随内容增长。</summary>
+    private FlowLayoutPanel MakeTopLine() => new()
+    {
+        Dock = DockStyle.Fill,
+        WrapContents = false,
+        AutoSize = false,
+        FlowDirection = FlowDirection.LeftToRight,
+        Margin = new Padding(0),
+        Padding = new Padding(2, 1, 2, 0),
+    };
+
+    private WrapRowPanel MakeWrapLine() => new WrapRowPanel
+    {
+        Dock = DockStyle.Top,
+        WrapContents = true,
+        AutoSize = false,
+        Height = LineHeight(),
+        FlowDirection = FlowDirection.LeftToRight,
+        Margin = new Padding(0),
+        Padding = new Padding(2, 1, 2, 1),
+        Width = 1200,   // 构造期先按宽窗口排一次，避免在默认 200px 宽度下反复折行
+    };
+
+    /// <summary>不换行行内的垂直居中（固定行高区域用）。</summary>
+    private sealed class RowFlowPanel : FlowLayoutPanel
+    {
+        protected override void OnLayout(LayoutEventArgs levent)
+        {
+            base.OnLayout(levent);
+            int h = ClientSize.Height - Padding.Vertical;
+            foreach (Control c in Controls)
+            {
+                int y = Padding.Top + Math.Max(0, (h - c.Height) / 2);
+                if (c.Top != y) c.Top = y;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 可换行行：宽度固定为父容器宽度（AutoSize=false），按首选高度自动增高，
+    /// 再按“视觉行”垂直居中。AutoSize=true 会让宽度保持内容宽度而不换行，导致右侧被裁。
+    /// </summary>
+    private sealed class WrapRowPanel : FlowLayoutPanel
+    {
+        private bool _adjusting;
+        private int _rightStart = int.MaxValue;
+
+        public void MarkRightGroup() => _rightStart = Controls.Count;
+
+        /// <summary>中间填充控件（如文件路径框）：同一行时撑满左右两组之间的空档。</summary>
+        public Control? StretchControl { get; set; }
+
+        protected override void OnLayout(LayoutEventArgs levent)
+        {
+            if (_adjusting)
+            {
+                base.OnLayout(levent);
+                return;
+            }
+            _adjusting = true;
+            try
+            {
+                base.OnLayout(levent);
+                if (ClientSize.Width > 0)
+                {
+                    int desired = GetPreferredSize(new Size(ClientSize.Width, 0)).Height;
+                    int min = Math.Max(28, Font.Height + 14);
+                    if (desired < min) desired = min;
+                    if (Height != desired) Height = desired;
+                }
+                CenterLines();
+                AlignRightGroup();
+                StretchToFill();
+            }
+            finally
+            {
+                _adjusting = false;
+            }
+        }
+
+        /// <summary>把标记之后的控件整体推到行右边缘；窄窗折到下一行时也右对齐。</summary>
+        private void AlignRightGroup()
+        {
+            if (_rightStart >= Controls.Count) return;
+            int width = ClientSize.Width;
+            if (width <= 0) return;
+            var rightSet = new HashSet<Control>();
+            for (int i = _rightStart; i < Controls.Count; i++) rightSet.Add(Controls[i]);
+
+            var rows = new List<List<Control>>();
+            List<Control>? current = null;
+            int prevLeft = int.MinValue;
+            foreach (Control c in Controls)
+            {
+                if (!c.Visible) continue;
+                if (current is null || c.Left <= prevLeft)
+                {
+                    current = new List<Control>();
+                    rows.Add(current);
+                }
+                current.Add(c);
+                prevLeft = c.Left;
+            }
+
+            int rightEdge = width - Padding.Right;
+            foreach (var row in rows)
+            {
+                var rights = row.Where(c => rightSet.Contains(c)).ToList();
+                if (rights.Count == 0) continue;
+                int maxRight = rights.Max(c => c.Right + c.Margin.Right);
+                int shift = rightEdge - maxRight;
+                if (shift <= 0) continue;
+                foreach (Control c in rights) c.Left += shift;
+            }
+        }
+
+        private void StretchToFill()
+        {
+            if (StretchControl is null || !StretchControl.Visible) return;
+            int width = ClientSize.Width;
+            if (width <= 0) return;
+            int index = Controls.GetChildIndex(StretchControl);
+            if (index <= 0 || index >= Controls.Count - 1) return;
+            int leftWidth = 0, rightWidth = 0;
+            for (int i = 0; i < Controls.Count; i++)
+            {
+                Control c = Controls[i];
+                if (!c.Visible || ReferenceEquals(c, StretchControl)) continue;
+                if (i < index) leftWidth += c.Width + c.Margin.Horizontal;
+                else rightWidth += c.Width + c.Margin.Horizontal;
+            }
+            int available = width - Padding.Horizontal - leftWidth - rightWidth - StretchControl.Margin.Horizontal;
+            int target = Math.Max(120, available - 128);
+            if (Math.Abs(StretchControl.Width - target) > 2)
+                StretchControl.Width = target;
+        }
+
+        private void CenterLines()
+        {
+            int count = Controls.Count;
+            int start = 0;
+            while (start < count)
+            {
+                int end = start + 1;
+                int prevLeft = Controls[start].Left;
+                while (end < count && Controls[end].Left > prevLeft)
+                {
+                    prevLeft = Controls[end].Left;
+                    end++;
+                }
+                int top = int.MaxValue, bottom = int.MinValue;
+                for (int i = start; i < end; i++)
+                {
+                    Control c = Controls[i];
+                    top = Math.Min(top, c.Top - c.Margin.Top);
+                    bottom = Math.Max(bottom, c.Bottom + c.Margin.Bottom);
+                }
+                int rowHeight = Math.Max(1, bottom - top);
+                for (int i = start; i < end; i++)
+                {
+                    Control c = Controls[i];
+                    int available = rowHeight - c.Margin.Vertical;
+                    int y = top + c.Margin.Top + Math.Max(0, (available - c.Height) / 2);
+                    if (c.Top != y) c.Top = y;
+                }
+                start = end;
+            }
+        }
+    }
+
+    private static Button ActionButton(string text, Action? onClick = null)
+    {
+        var button = new Button { Text = text, AutoSize = true };
+        if (onClick != null) button.Click += (_, _) => onClick();
+        return button;
+    }
+
+    private static FlowLayoutPanel MakeGroup(params Control[] controls)
+    {
+        var group = new RowFlowPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        foreach (Control control in controls)
+        {
+            control.Margin = new Padding(3, 2, 2, 2);
+            if (control is Button button)
+                button.Margin = new Padding(2, 1, 2, 1);
+            group.Controls.Add(control);
+        }
+        return group;
+    }
+
+    private static void Put(FlowLayoutPanel line, Control control)
+    {
+        control.Margin = new Padding(3, 2, 2, 2);
+        if (control is Label or CheckBox)
+            control.AutoSize = true;
+        if (control is Button button)
+        {
+            button.AutoSize = true;
+            button.Margin = new Padding(2, 1, 2, 1);
+        }
+        line.Controls.Add(control);
+    }
+
+    private int TextUnit() => Math.Max(7, TextRenderer.MeasureText("0", Font).Width);
 
     private Control BuildCenter()
     {
