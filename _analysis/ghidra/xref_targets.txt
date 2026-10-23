@@ -1,0 +1,36 @@
+# xref targets: globals / strings of interest
+0x4ed548 # display truncate threshold
+0x4ed53c # send counter candidate
+0x4ed540 # recv counter
+0x4ed544 # english UI flag
+0x4ed534 # network mode
+0x4ed535 # second network byte
+0x4ed538 # local ip display string
+0x4ed650 # multi-send index
+0x4ed64e # multi-send start flag
+0x4ed654 # multi-send skip counter
+0x4ed658 # multi-send second counter
+0x50de30 # send text buffer
+0x50de34 # HEX send flag
+0x50de38 # recv hex accumulation
+0x50de40 # recv raw accumulation
+0x50de44 # recv-to-file name string
+0x50de48 # split-byte stash
+0x50e650 # form global pointer
+0x50e654 # crc32 table
+0x50ea54 # tickcount global
+0x50ea70 # memo send string global
+0x50ea74 # multi-send row index array
+0x50ea78 # multi-send order key array
+0x4ed63d # hex digit table
+0x4ee274 # time header unicode prefix
+0x4ee2dd # Unable to set DTR
+0x4ee3a4 # DTR error (chinese)
+0x4ee41d # Unable to set RTS
+0x4ef060 # SaveWindows format string
+0x4f3cc5 # version history text
+0x4ef59b # ini keys area
+0x4ef591 # old ini comment
+0x4efb64 # highest baudrate msg
+0x4efb84 # lowest baudrate msg
+0x4ee09b # HEX input hint

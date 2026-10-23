@@ -1,0 +1,6 @@
+* text=auto
+
+*.exe binary
+*.dll binary
+*.pdb binary
+*.png binary

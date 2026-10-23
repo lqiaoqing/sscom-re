@@ -1,0 +1,3 @@
+form props end at 0x52d16d
+  BADCHILD at 0x52d16d b'\x04Menu\x07\tMainMenu1\x0eOld'
+children parse: OK end 0x52d16d

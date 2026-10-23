@@ -1,0 +1,134 @@
+candidates: 342
+top-level objects found: 58
+== FORM OK @0x52c252 (type=TButton name=Button1)
+   /Button1                     TButton            Caption='OK' 
+== FORM Cancel @0x52c2b1 (type=TButton name=Button2)
+   /Button2                     TButton            Caption='Cancel' 
+== FORM  Settings  @0x52c30c (type=TGroupBox name=GroupBox1)
+   /GroupBox1                   TGroupBox          Caption=' Settings ' 
+   /GroupBox1/Label1            TLabel             Caption='Port' 
+   /GroupBox1/Label2            TLabel             Caption='Baud rate' 
+   /GroupBox1/Label3            TLabel             Caption='Data bits' 
+   /GroupBox1/Label4            TLabel             Caption='Stop bits' 
+   /GroupBox1/Label5            TLabel             Caption='Parity' 
+   /GroupBox1/Label6            TLabel             Caption='Flow control' 
+== FORM  ASCII Settings  @0x52c966 (type=TGroupBox name=GroupBox1)
+   /GroupBox1                   TGroupBox          Caption=' ASCII Settings ' 
+   /GroupBox1/CheckBox1         TCheckBox          Caption='Echo typed charachters locally' 
+   /GroupBox1/CheckBox2         TCheckBox          Caption='Send line feeds with carriage return' 
+   /GroupBox1/CheckBox3         TCheckBox          Caption='Wrap lines that exceed terminal width' 
+   /GroupBox1/CheckBox4         TCheckBox          Caption='Force incoming data to 7 bit ASCII' 
+   /GroupBox1/CheckBox5         TCheckBox          Caption='Append line feeds to incoming carriage return' 
+== FORM  Terminal Settings  @0x52cbe8 (type=TGroupBox name=GroupBox2)
+   /GroupBox2                   TGroupBox          Caption=' Terminal Settings ' 
+   /GroupBox2/Label1            TLabel             Caption='Caret' 
+   /GroupBox2/Label3            TLabel             Caption='Columns' 
+   /GroupBox2/Label4            TLabel             Caption='Rows' 
+   /GroupBox2/Label2            TLabel             Caption='Emulation' 
+   /GroupBox2/Label5            TLabel             Caption='Cursor keys' 
+== FORM OK @0x52cf9e (type=TButton name=Button1)
+   /Button1                     TButton            Caption='OK' 
+== FORM Cancel @0x52cffe (type=TButton name=Button2)
+   /Button2                     TButton            Caption='Cancel' 
+== FORM  @0x52d293 (type=TSplitter name=Splitter1)
+   /Splitter1                   TSplitter           OnMoved=Splitter1Moved
+== FORM - @0x52db5f (type=TSpeedButton name=SpeedButton4)
+   /SpeedButton4                TSpeedButton       Caption='-' OnClick=SpeedButton4Click
+== FORM + @0x52dbc0 (type=TSpeedButton name=SpeedButton3)
+   /SpeedButton3                TSpeedButton       Caption='+' OnClick=SpeedButton3Click
+== FORM 开始下载STM/GD32 @0x52e093 (type=TBitBtn name=isp255_stm32)
+   /isp255_stm32                TBitBtn            Caption='开始下载STM/GD32' OnClick=isp255_stm32Click
+== FORM 烧64K字节约10秒,稍慢(普通串口) @0x52e109 (type=TRadioButton name=writelow)
+   /writelow                    TRadioButton       Caption='烧64K字节约10秒,稍慢(普通串口)' 
+== FORM 烧64K字节约5秒,快速(CH340等USB串口) @0x52e173 (type=TRadioButton name=writemiddle)
+   /writemiddle                 TRadioButton       Caption='烧64K字节约5秒,快速(CH340等USB串口)' 
+== FORM 开始下载STC/IAP15（外部晶振) @0x52e3f9 (type=TBitBtn name=isp_stc)
+   /isp_stc                     TBitBtn            Caption='开始下载STC/IAP15（外部晶振)' OnClick=isp_stcClick
+== FORM 115200bps,烧64K字节约15秒,稍慢(普通串口) @0x52e471 (type=TRadioButton name=stcslower)
+   /stcslower                   TRadioButton       Caption='115200bps,烧64K字节约15秒,稍慢(普通串口)' 
+== FORM 230400bps,烧64K字节约11秒,稍快(CH340等USB串口) @0x52e4f8 (type=TRadioButton name=stcfaster)
+   /stcfaster                   TRadioButton       Caption='230400bps,烧64K字节约11秒,稍快(CH340等USB串口)' 
+== FORM 460800bps,烧64K字节约8.8秒,快速(CH340等USB串口) @0x52ea22 (type=TRadioButton name=stcfastest)
+   /stcfastest                  TRadioButton       Caption='460800bps,烧64K字节约8.8秒,快速(CH340等USB串口)' 
+== FORM English @0x52f838 (type=TCheckBox name=CheckBox18)
+   /CheckBox18                  TCheckBox          Caption='English' OnClick=languageChange
+== FORM 最前 @0x52f974 (type=TCheckBox name=CheckBox7)
+   /CheckBox7                   TCheckBox          Caption='最前' OnMouseUp=CheckBox7MouseUp
+== FORM  @0x53047a (type=TEdit name=timeoutText)
+   /timeoutText                 TEdit               OnKeyPress=timeoutTextKeyPress
+== FORM  @0x530ca6 (type=TEdit name=Edit1)
+   /Edit1                       TEdit               OnKeyPress=Edit1KeyPress
+== FORM  @0x530e59 (type=TEdit name=verify_Num_edit)
+   /verify_Num_edit             TEdit               OnExit=verify_Num_editExit
+== FORM  @0x530ef2 (type=TComboBox name=ComboBox1)
+   /ComboBox1                   TComboBox           OnChange=ComboBox1Change
+== FORM  @0x531322 (type=TImage name=Image2)
+   /Image2                      TImage              OnClick=Label23Click
+== FORM  @0x531f7d (type=TEdit name=remotePort)
+   /remotePort                  TEdit               OnChange=remotePortChange
+== FORM  @0x5321c0 (type=TEdit name=localPort)
+   /localPort                   TEdit               OnChange=localPortChange
+== FORM  @0x532b28 (type=TTimer name=Refresh100msTimer)
+   /Refresh100msTimer           TTimer              OnTimer=Rfreues100msTimer
+== FORM  @0x532b77 (type=TTimer name=SendStringTimer)
+   /SendStringTimer             TTimer              OnTimer=SendStringTimerTimer
+== FORM  @0x532bc6 (type=TTimer name=Send_N_StringTimer)
+   /Send_N_StringTimer          TTimer              OnTimer=Send_N_StringTimerTimer
+== FORM  @0x532ca5 (type=TTimer name=getNEWSTimer)
+   /getNEWSTimer                TTimer              OnTimer=getNEWSTimerTimer
+== FORM  @0x532cec (type=TTimer name=cacelGetnewsTimer)
+   /cacelGetnewsTimer           TTimer              OnTimer=cacelGetnewsTimerTimer
+== FORM  @0x532e5c (type=TClientSocket name=ClientSocket)
+   /ClientSocket                TClientSocket       OnError=ClientSocketError
+== FORM  @0x532f22 (type=TServerSocket name=ServerSocket)
+   /ServerSocket                TServerSocket       OnClientError=ServerSocketClientError
+== FORM  @0x533035 (type=TNMUDP name=NMUDP)
+   /NMUDP                       TNMUDP              OnInvalidHost=NMUDPInvalidHost
+== FORM 500K @0x53349d (type=TMenuItem name=N500K)
+   /N500K                       TMenuItem          Caption='500K' OnClick=N500KClick
+== FORM 按键立即发送该键值 @0x533668 (type=TMenuItem name=term_key_send)
+   /term_key_send               TMenuItem          Caption='按键立即发送该键值' OnClick=term_key_sendClick
+== FORM 每发256字节延时1毫秒 @0x53382e (type=TMenuItem name=sendfile_1)
+   /sendfile_1                  TMenuItem          Caption='每发256字节延时1毫秒' OnClick=sendfile_1Click
+== FORM   @0x533d77 (type=TMenuItem name=PCB1)
+   /PCB1                        TMenuItem          Caption=' ' OnClick=PCB1Click
+== FORM <500 @0x533f6f (type=TSpeedButton name=BitBtn2)
+   /BitBtn2                     TSpeedButton       Caption='<500' OnClick=BitBtn2Click
+== FORM 500> @0x533fce (type=TSpeedButton name=BitBtn3)
+   /BitBtn3                     TSpeedButton       Caption='500>' OnClick=BitBtn3Click
+== FORM 1 @0x53402d (type=TCheckBox name=CheckBox9)
+   /CheckBox9                   TCheckBox          Caption='1' 
+== FORM 2 @0x5340ab (type=TCheckBox name=CheckBox10)
+   /CheckBox10                  TCheckBox          Caption='2' 
+== FORM 3 @0x53410e (type=TCheckBox name=CheckBox11)
+   /CheckBox11                  TCheckBox          Caption='3' 
+== FORM 4 @0x534171 (type=TCheckBox name=CheckBox12)
+   /CheckBox12                  TCheckBox          Caption='4' 
+== FORM 5 @0x5341d4 (type=TCheckBox name=CheckBox7)
+   /CheckBox7                   TCheckBox          Caption='5' 
+== FORM 6 @0x53423a (type=TCheckBox name=CheckBox15)
+   /CheckBox15                  TCheckBox          Caption='6' 
+== FORM 8 @0x5342a9 (type=TCheckBox name=CheckBox17)
+   /CheckBox17                  TCheckBox          Caption='8' 
+== FORM 7 @0x53430c (type=TCheckBox name=CheckBox16)
+   /CheckBox16                  TCheckBox          Caption='7' 
+== FORM 通讯协议 @0x53467c (type=TBitBtn name=BitBtn4)
+   /BitBtn4                     TBitBtn            Caption='通讯协议' OnClick=BitBtn4Click
+== FORM To Register Component, @0x535084 (type=TLabel name=Label2)
+   /Label2                      TLabel             Caption='To Register Component,' 
+== FORM Call  603-578-2200 @0x5350d3 (type=TLabel name=Label3)
+   /Label3                      TLabel             Caption='Call  603-578-2200' 
+== FORM 1-888-2-GET-WEB  (In USA) @0x53511e (type=TLabel name=Label4)
+   /Label4                      TLabel             Caption='1-888-2-GET-WEB  (In USA)' 
+== FORM Fax  603-578-2228 @0x535171 (type=TLabel name=Label5)
+   /Label5                      TLabel             Caption='Fax  603-578-2228' 
+== FORM E-mail   info@netmastersllc.com @0x5351bb (type=TLabel name=Label6)
+   /Label6                      TLabel             Caption='E-mail   info@netmastersllc.com' 
+== FORM Contact NetMasters LLC  @0x535215 (type=TLabel name=Label7)
+   /Label7                      TLabel             Caption='Contact NetMasters LLC ' 
+== FORM   Obtain  Support and Source Code @0x536910 (type=TLabel name=Label9)
+   /Label9                      TLabel             Caption='  Obtain  Support and Source Code' 
+== FORM Web  @0x53696b (type=TLabel name=Label10)
+   /Label10                     TLabel             Caption='Web ' 
+== FORM OK @0x5369aa (type=TButton name=OKBtn)
+   /OKBtn                       TButton            Caption='OK' 

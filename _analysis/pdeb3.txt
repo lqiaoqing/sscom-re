@@ -1,0 +1,3 @@
+form props end at 0x52d1e7
+BADVALUE prop Panels in StatusBar1 at 0x52d43f type=0x0e b'\x0e\x01\x04Text\x06\rwww.dax'
+children: OK end 0x52d3db

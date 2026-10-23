@@ -1,0 +1,52 @@
+# batch3: RTL helpers used by save/recv-to-file/INI paths
+0x4eb2f4 # format/concat helper
+0x4eaf10 # concat
+0x4eaee8 # assign
+0x4eacc0 # literal->string
+0x4eaeb8 # free string
+0x4018bc # string alloc helper
+0x401b60 # get string ptr or empty
+0x402994 # char accessor
+0x4e0b4c # begin string context?
+0x4d7060 # now/date provider
+0x4eb544 # double->string
+0x4a3dd0 # get current dir?
+0x4d6104 # trailing delimiter?
+0x4aa8e8 # show message?
+0x4e2098 # file write
+0x4e19b8 # file close
+0x4e1ae4 # file open/create
+0x4e2aac # thunk to file open
+0x4e37e4 # recv-to-file write?
+0x4e2a2c # raise error
+0x4e1a48 # file type check?
+0x4e276c # file handle adjust?
+0x4e26a0 # end context?
+0x4eb720 # CreateFile trampoline
+0x4eb7da # GetFileAttributes trampoline
+0x4eb7f8 # GetLastError trampoline
+0x4eb70e # CloseHandle trampoline
+0x4e1a48 # dup
+0x4d5dbc # strtoint (no default)
+0x4d5e34 # strtointdef
+0x4d5d8c # inttostr
+0x4d6000 # ? inttostr variant
+0x4eb058 # string length
+0x4e4344 # atoi
+0x4e098d # pos substring
+0x4e0a50 # pos impl
+0x4eb14c # string copy range
+0x4eb0e0 # string insert
+0x4afa20 # set control text
+0x4af9f0 # get control text
+0x47d578 # EM_REPLACESEL insert
+0x4a679c # timer enable
+0x4a67ac # timer interval set
+0x4a67d4 # timer event dispatcher
+0x4ec0ee # sendmessage trampoline
+0x4ec160 # setwindowpos trampoline
+0x4b56fc # get handle
+0x4c00f8 # ?
+0x4af908 # set visible?
+0x4c2d24 # set progressbar pos?
+0x4e1ae4 # dup

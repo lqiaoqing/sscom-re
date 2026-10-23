@@ -1,0 +1,8 @@
+sendfile_0 {}
+sendfile_1 {'Checked': True}
+sendfile_10 {}
+sendfile_50 {}
+sendfile_100 {}
+CheckBox3 {}
+Edit1 {'Text': '1000'}
+ProgressBar1 {'Max': 100}

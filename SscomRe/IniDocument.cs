@@ -1,0 +1,301 @@
+using System.Globalization;
+using System.Text;
+
+namespace SscomRe;
+
+/// <summary>N1080 读入后的端口选择。1 和 2 都是 TCPClient，3 是 UDP，其余整串是端口名。</summary>
+public enum PortKind
+{
+    Serial,
+    TcpClient,
+    Udp,
+}
+
+/// <summary>
+/// sscom51.ini 的文本格式（规格「保存参数与导入 ini」）。
+/// 行尾 CRLF。行数据里的逗号、CR、LF 写成 0x02、0x03、0x04。设置行是 N键=,&lt;值&gt;。
+/// </summary>
+public static class IniDocument
+{
+    public const string CommentHex = ";\"=\"后面的H表示这是个HEX数据串";
+    public const string CommentNx = ";Nx表示第几条定义的字符串(1<x<=N)";
+    public const string SaveFailedMessage = "无法保存ini文件!请拷贝exe文件到且它目录试试.";
+    public const string ReadFailedMessage = "文件读取失败!";
+
+    private static readonly Encoding Gbk = CreateGbk();
+
+    public static string CurrentPath() =>
+        Path.Combine(Directory.GetCurrentDirectory(), "sscom51.ini");
+
+    public static string Save(IniSnapshot snap)
+    {
+        var sb = new StringBuilder();
+        sb.Append(CommentHex).Append("\r\n");
+        sb.Append(CommentNx).Append("\r\n");
+
+        for (int k = 1; k <= 99; k++)
+        {
+            int i = k - 1;
+            sb.Append('N').Append(100 + k).Append('=')
+                .Append(Esc(snap.Order[i])).Append(',')
+                .Append(Esc(snap.Comment[i])).Append(',')
+                .Append(Esc(snap.Delay[i])).Append("\r\n");
+            sb.Append('N').Append(k).Append('=')
+                .Append(snap.Hex[i] ? 'H' : 'A').Append(',')
+                .Append(Esc(snap.Data[i])).Append("\r\n");
+        }
+
+        Setting(sb, "发送文件时每256字节延时时间ms", 1051, snap.SendFileDelayMs.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "打开文件地址和名称", 1052, snap.FilePath);
+        Setting(sb, "主面板ASC字符串", 1053, snap.AscText);
+        Setting(sb, "主面板HEX数据串", 1054, snap.HexText);
+        Setting(sb, "主面板发送方式(ASC or HEX)", 1055, Bit(snap.HexSend));
+        Setting(sb, "主面板字符串发送间隔时间ms", 1056, snap.TimerInterval);
+        Setting(sb, "主面板字符串发送新行", 1057, Bit(snap.AddCrLf));
+        Setting(sb, "多条字符串发送间隔时间ms", 1058, "1000");
+        Setting(sb, "接收窗口是否HEX显示方式", 1059, Bit(snap.HexDisplay));
+        Setting(sb, "校验方式", 1060, snap.VerifyMode.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "保存DTR", 1061, Bit(snap.Dtr));
+        Setting(sb, "保存RTS", 1062, Bit(snap.Rts));
+        Setting(sb, "程序启动时是否打开串口", 1063, Bit(snap.OpenImmediately));
+        Setting(sb, "是否分包显示", 1064, Bit(snap.Timestamp));
+        Setting(sb, "分包超时时间ms", 1065, snap.TimeoutMs);
+        Setting(sb, "接收窗背景颜色", 1066, snap.MemoBackColor.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "显示缓冲上限", 1067, snap.DisplayLimit.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "远程IP地址", 1068, snap.RemoteIp);
+        Setting(sb, "远程端口", 1069, snap.RemotePort);
+        Setting(sb, "本地端口", 1070, snap.LocalPort);
+        Setting(sb, "回车后发送行", 1071, Bit(snap.TermEnter));
+        Setting(sb, "按键立即发送", 1072, Bit(snap.TermKey));
+        Setting(sb, "回显", 1073, Bit(snap.TermEcho));
+        Setting(sb, "第几字节至末尾加校验", 1074, snap.VerifyFrom);
+        Setting(sb, "至末尾倒数第几字节加校验", 1075, snap.TailReserve.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "终端仿真输入回车后是否自动加换行", 1076, Bit(snap.TermAddLf));
+        Setting(sb, "当前串口号或网络模式", 1080, snap.PortValue);
+        Setting(sb, "波特率", 1081, snap.Baud);
+        Setting(sb, "窗口宽", 1082, snap.FormWidth.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "窗口高", 1083, snap.FormHeight.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "窗口left", 1084, snap.FormLeft.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "窗口top", 1085, snap.FormTop.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "分割线位置", 1086, snap.MultiPanelWidth.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "多条发送按钮的宽度", 1087, snap.MultiButtonWidth.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "窗口字体名称", 1088, snap.FontName);
+        Setting(sb, "窗口字体大小", 1089, snap.FontSize);
+        Setting(sb, "窗口字体颜色", 1090, snap.FontColor.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "C:Chinese汉语, E:English", 1100, "C");
+        sb.Append(";end\r\n");
+        return sb.ToString();
+    }
+
+    public static IniSnapshot Load(string text)
+    {
+        var snap = new IniSnapshot();
+        if (string.IsNullOrEmpty(text)) return snap;
+
+        string normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        foreach (string raw in normalized.Split('\n'))
+        {
+            string line = raw;
+            if (line.Length == 0 || line[0] == ';') continue;
+            if (line[0] != 'N' && line[0] != 'n') continue;
+            int eq = line.IndexOf('=');
+            if (eq <= 1) continue;
+            if (!int.TryParse(line.Substring(1, eq - 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int key))
+                continue;
+            string payload = line.Substring(eq + 1);
+            string[] parts = payload.Split(',');
+
+            if (key is >= 1 and <= 99)
+            {
+                int i = key - 1;
+                snap.Hex[i] = parts.Length > 0 && Unesc(parts[0]) == "H";
+                snap.Data[i] = parts.Length > 1 ? Unesc(string.Join(",", parts.Skip(1))) : "";
+                continue;
+            }
+
+            if (key is >= 101 and <= 199)
+            {
+                int i = key - 101;
+                string orderText = parts.Length > 0 ? Unesc(parts[0]) : "";
+                int order = int.TryParse(orderText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int o)
+                    ? Fx.Clamp(o, 0, 99) : 0;
+                snap.Order[i] = order.ToString(CultureInfo.InvariantCulture);
+                if (parts.Length >= 3)
+                    snap.Comment[i] = Unesc(string.Join(",", parts.Skip(1).Take(parts.Length - 2)));
+                else if (parts.Length == 2)
+                    snap.Comment[i] = Unesc(parts[1]);
+                string delayText = parts.Length >= 3 ? Unesc(parts[parts.Length - 1]) : "";
+                snap.Delay[i] = int.TryParse(delayText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int d)
+                    ? d.ToString(CultureInfo.InvariantCulture) : "1000";
+                continue;
+            }
+
+            string value = parts.Length >= 2 ? Unesc(string.Join(",", parts.Skip(1))) : Unesc(payload);
+            ApplySetting(snap, key, value);
+        }
+        return snap;
+    }
+
+    /// <summary>整段按整数解析。0 或解析失败时整串是端口名；1 和 2 都选 TCPClient；3 选 UDP。</summary>
+    public static (PortKind Kind, string PortName) ParsePortMode(string value)
+    {
+        if (int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) && n != 0)
+        {
+            if (n == 3) return (PortKind.Udp, "");
+            if (n is 1 or 2) return (PortKind.TcpClient, "");
+        }
+        return (PortKind.Serial, value);
+    }
+
+    public static void WriteFile(string path, IniSnapshot snap)
+    {
+        File.WriteAllText(path, Save(snap), Gbk);
+    }
+
+    public static string ReadFile(string path) => File.ReadAllText(path, Gbk);
+
+    private static void ApplySetting(IniSnapshot snap, int key, string value)
+    {
+        switch (key)
+        {
+            case 1051:
+                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int delay))
+                    snap.SendFileDelayMs = delay;
+                break;
+            case 1052: snap.FilePath = value; break;
+            case 1053: snap.AscText = value; break;
+            case 1054: snap.HexText = value; break;
+            case 1055: snap.HexSend = IsOn(value); break;
+            case 1056: snap.TimerInterval = value; break;
+            case 1057: snap.AddCrLf = IsOn(value); break;
+            case 1058:
+                // 重写没有隐藏的 Edit35。读到的值不写进主发送间隔。
+                break;
+            case 1059: snap.HexDisplay = IsOn(value); break;
+            case 1060:
+                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int mode))
+                    snap.VerifyMode = mode;
+                break;
+            case 1061: snap.Dtr = IsOn(value); break;
+            case 1062: snap.Rts = IsOn(value); break;
+            case 1063: snap.OpenImmediately = IsOn(value); break;
+            case 1064: snap.Timestamp = IsOn(value); break;
+            case 1065: snap.TimeoutMs = value; break;
+            case 1066:
+                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int back))
+                    snap.MemoBackColor = back;
+                break;
+            case 1067:
+                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int limit))
+                    snap.DisplayLimit = limit;
+                break;
+            case 1068: snap.RemoteIp = value; break;
+            case 1069: snap.RemotePort = value; break;
+            case 1070: snap.LocalPort = value; break;
+            case 1071: snap.TermEnter = IsOn(value); break;
+            case 1072: snap.TermKey = IsOn(value); break;
+            case 1073: snap.TermEcho = IsOn(value); break;
+            case 1074: snap.VerifyFrom = value; break;
+            case 1075:
+                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int tail))
+                    snap.TailReserve = tail;
+                break;
+            case 1076: snap.TermAddLf = IsOn(value); break;
+            case 1080: snap.PortValue = value; break;
+            case 1081: snap.Baud = value; break;
+            case 1082: snap.FormWidth = ParseInt(value, snap.FormWidth); break;
+            case 1083: snap.FormHeight = ParseInt(value, snap.FormHeight); break;
+            case 1084: snap.FormLeft = ParseInt(value, snap.FormLeft); break;
+            case 1085: snap.FormTop = ParseInt(value, snap.FormTop); break;
+            case 1086: snap.MultiPanelWidth = ParseInt(value, 515); break;
+            case 1087: snap.MultiButtonWidth = ParseInt(value, 120); break;
+            case 1088: snap.FontName = value; break;
+            case 1089: snap.FontSize = value; break;
+            case 1090:
+                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int fc))
+                    snap.FontColor = fc;
+                break;
+            case 1100:
+                snap.Language = value;
+                break;
+        }
+    }
+
+    private static void Setting(StringBuilder sb, string comment, int key, string value)
+    {
+        sb.Append(';').Append(comment).Append("\r\n");
+        sb.Append('N').Append(key).Append("=,").Append(Esc(value)).Append("\r\n");
+    }
+
+    private static string Bit(bool on) => on ? "1" : "0";
+
+    private static bool IsOn(string value) => value is "1" or "True" or "true";
+
+    private static int ParseInt(string value, int fallback) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) ? n : fallback;
+
+    private static string Esc(string s) =>
+        s.Replace(",", "0x02").Replace("\r", "0x03").Replace("\n", "0x04");
+
+    private static string Unesc(string s) =>
+        s.Replace("0x04", "\n").Replace("0x03", "\r").Replace("0x02", ",");
+
+    private static Encoding CreateGbk() => Encoding.GetEncoding(936);
+}
+
+/// <summary>一份和界面无关的 ini 数据。缺文件或没写到的键用这里的默认值。</summary>
+public sealed class IniSnapshot
+{
+    public IniSnapshot()
+    {
+        Order = Enumerable.Repeat("0", 99).ToArray();
+        Comment = Enumerable.Range(1, 99).Select(i => i.ToString(CultureInfo.InvariantCulture)).ToArray();
+        Delay = Enumerable.Repeat("1000", 99).ToArray();
+        Hex = new bool[99];
+        Data = Enumerable.Repeat("", 99).ToArray();
+    }
+
+    public string[] Order { get; }
+    public string[] Comment { get; }
+    public string[] Delay { get; }
+    public bool[] Hex { get; }
+    public string[] Data { get; }
+
+    public int SendFileDelayMs { get; set; } = 1;
+    public string FilePath { get; set; } = "";
+    public string AscText { get; set; } = "abcdefg";
+    public string HexText { get; set; } = "12 FF 00 30";
+    public bool HexSend { get; set; }
+    public string TimerInterval { get; set; } = "1000";
+    public bool AddCrLf { get; set; }
+    public bool HexDisplay { get; set; }
+    public int VerifyMode { get; set; }
+    public bool Dtr { get; set; }
+    public bool Rts { get; set; }
+    public bool OpenImmediately { get; set; }
+    public bool Timestamp { get; set; } = true;
+    public string TimeoutMs { get; set; } = "20";
+    public int MemoBackColor { get; set; } = SystemColors.Window.ToArgb();
+    public int DisplayLimit { get; set; } = 1_000_000;
+    public string RemoteIp { get; set; } = "";
+    public string RemotePort { get; set; } = "8080";
+    public string LocalPort { get; set; } = "8080";
+    public bool TermEnter { get; set; }
+    public bool TermKey { get; set; }
+    public bool TermEcho { get; set; }
+    public string VerifyFrom { get; set; } = "1";
+    public int TailReserve { get; set; }
+    public bool TermAddLf { get; set; }
+    public string PortValue { get; set; } = "COM1";
+    public string Baud { get; set; } = "115200";
+    public int FormWidth { get; set; } = 700;
+    public int FormHeight { get; set; } = 600;
+    public int FormLeft { get; set; } = 250;
+    public int FormTop { get; set; } = 180;
+    public int MultiPanelWidth { get; set; } = 515;
+    public int MultiButtonWidth { get; set; } = 120;
+    public string FontName { get; set; } = "Microsoft YaHei UI";
+    public string FontSize { get; set; } = "9";
+    public int FontColor { get; set; } = SystemColors.WindowText.ToArgb();
+    public string Language { get; set; } = "C";
+}

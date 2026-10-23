@@ -1,0 +1,15 @@
+TYPE TForm1 NAME Form1
+  Left                         type=0x03 raw=03c30003546f70038f000557 val=195
+  Top                          type=0x03 raw=038f00055769647468031a03 val=143
+  Width                        type=0x03 raw=031a0306486569676874037f val=794
+  Height                       type=0x03 raw=037f0215486f727a5363726f val=639
+  HorzScrollBar.Visible        type=0x08 raw=080743617074696f6e062773 val=False
+  Caption                      type=0x06 raw=06277373636f6d352e303061 val='sscom5.00a,作者:大虾丁丁,2618058@qq.com'
+  Color                        type=0x07 raw=0709636c42746e466163650e val='clBtnFace'
+  DefaultMonitor               type=0x07 raw=0709646d4465736b746f700c val='dmDesktop'
+  Font.Charset                 type=0x07 raw=070f44454641554c545f4348 val='DEFAULT_CHARSET'
+  Font.Color                   type=0x07 raw=070c636c57696e646f775465 val='clWindowText'
+  Font.Height                  type=0x02 raw=02f509466f6e742e4e616d65 val=245
+  Font.Name                    type=0x06 raw=060d4d532053616e73205365 val='MS Sans Serif'
+  Font.Style                   type=0x0b raw=0b00044d656e7507094d6169 val=('SET', [])
+PROPS END at 0x52d16c

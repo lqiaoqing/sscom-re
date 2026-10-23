@@ -1,0 +1,66 @@
+# SSCOM batch 1 decompile targets (from handoff remaining list + spec cross-checks)
+0x409d58 # FormCreate
+0x40fc18 # FormClose
+0x4029c4 # open/close button
+0x4019f4 # port name transform
+0x418188 # network mode detect (TCPClient/TCPServer/UDP)
+0x418c20 # baud rate apply
+0x419018 # databits apply
+0x4190b0 # stopbits apply
+0x419148 # parity apply
+0x40578c # displayCOMdata
+0x402e90 # byte->hex text
+0x4030a4 # text escape (\0, CR, LF)
+0x4034a4 # send packer (text/HEX/checksum)
+0x401bac # checksum algorithms
+0x403420 # Button_SendClick
+0x40fd54 # Button42Click (save data)
+0x4219cc # CheckBox19Click (recv to file)
+0x40d7a4 # CheckBox3Click (timed send)
+0x40da24 # SendStringTimerTimer
+0x40cf00 # MemoKeyPress
+0x40ce00 # CheckBox4Click (HEX send)
+0x407638 # CheckBox1Click
+0x4077b0 # CheckBox2Click
+0x407928 # ComPortCTSChange
+0x4079c0 # ComPortDSRChange
+0x407a58 # ComPortRLSDChange
+0x4065a0 # Rfreues100msTimer (status bar)
+0x428f90 # CheckBox7MouseUp (topmost)
+0x425e68 # sendfile_0Click
+0x425ec8 # sendfile_1Click
+0x425f28 # sendfile_10Click
+0x425f88 # sendfile_50Click
+0x425fe8 # sendfile_100Click
+0x42537c # N10Click
+0x425584 # N200KClick
+0x425600 # N500KClick
+0x42567c # N1MClick
+0x4256f8 # N2MClick
+0x425774 # N5MClick
+0x425a50 # MenuComItemClick
+0x425834 # TCPClient1Click
+0x4258e8 # TCPServer1Click
+0x42599c # UDP1Click
+0x4257f0 # Open_immediatelyClick
+0x425418 # term_enter_sendClick
+0x42549c # term_key_sendClick
+0x425520 # term_showtypeClick
+0x42948c # term_0Dadd0AClick
+0x408428 # NdataOnDblclick
+0x4085fc # makeTList
+0x407e7c # NCheckBoxMouseUp
+0x407eb4 # NEditKeyPress
+0x407f6c # NorderKeyUp
+0x4080f8 # NtimeKeyUp
+0x407b00 # Splitter1Moved
+0x4133b4 # saveconfigClick
+0x4103c0 # CheckBox6Click
+0x4105d8 # Send_N_StringTimerTimer
+0x4225d0 # disConnectClick
+0x4240c8 # ClientSocketConnect
+0x4249fc # ClientSocketRead
+0x423b80 # ServerSocketClientRead
+0x424a6c # NMUDPDataReceived
+0x405730 # ComPortRxChar
+0x4056c4 # ComPortRx80Full
