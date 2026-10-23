@@ -117,6 +117,7 @@ public sealed class MainForm : Form
     private Button _connectButton = null!;
     private Button _disconnectButton = null!;
     private ToolStripMenuItem _openImmediatelyItem = null!;
+    private ToolStripMenuItem _lightThemeItem = null!;
     private ToolStripMenuItem _commMenu = null!;
     private ToolStripMenuItem[] _protocolItems = [];
     private readonly List<ToolStripMenuItem> _comMenuItems = new();
@@ -150,6 +151,9 @@ public sealed class MainForm : Form
         Height = 700;
         MinimumSize = new Size(820, 560);
         StartPosition = FormStartPosition.CenterScreen;
+
+        // 建控件前先定主题，避免启动时先画深色再整体换色。
+        Theme.SetLight(IniDocument.ReadThemePreference(IniPath()));
 
         BuildUi();
         WireEvents();
@@ -308,6 +312,17 @@ public sealed class MainForm : Form
         var display = new ToolStripMenuItem("显示");
         display.DropDownItems.Add(new ToolStripMenuItem("字体/颜色/大小/...", null, (_, _) => PickRecvFont()));
         display.DropDownItems.Add(new ToolStripMenuItem("背景颜色", null, (_, _) => PickRecvBackColor()));
+        _lightThemeItem = new ToolStripMenuItem("浅色主题")
+        {
+            CheckOnClick = true,
+            Checked = Theme.IsLight,
+        };
+        _lightThemeItem.Click += (_, _) =>
+        {
+            ApplyTheme(_lightThemeItem.Checked);
+            AutoSave();
+        };
+        display.DropDownItems.Add(_lightThemeItem);
         var limitMenu = new ToolStripMenuItem("显示缓冲上限");
         AddLimitItem(limitMenu, "200K", 200_000);
         AddLimitItem(limitMenu, "500K", 500_000);
@@ -898,6 +913,7 @@ public sealed class MainForm : Form
             BackColor = Theme.Log,
             ForeColor = Theme.Text,
             Font = Theme.MonoFont(10F),
+            Tag = "log",
         };
 
         _split = new SplitContainer
@@ -1289,7 +1305,7 @@ public sealed class MainForm : Form
         _recvStatus = new ToolStripStatusLabel("R:0") { AutoSize = true };
         _modemStatus = new ToolStripStatusLabel("CTS=- DSR=- RLSD=-") { AutoSize = true, Margin = new Padding(0, 3, 8, 2) };
         _connStatus.ForeColor = Theme.Text;
-        _sentStatus.ForeColor = Theme.Amber;
+        _sentStatus.ForeColor = Theme.StatusSend;
         _recvStatus.ForeColor = Theme.Accent;
         _modemStatus.ForeColor = Theme.Muted;
         strip.Items.AddRange(new ToolStripItem[] { _connStatus, _sentStatus, _recvStatus, _modemStatus });
@@ -1926,16 +1942,8 @@ public sealed class MainForm : Form
             _modemStatus.Text = "CTS=- DSR=- RLSD=-";
         }
 
-        // 状态栏底色随接收计数分档（规格：20 万/50 万/100 万/200 万）；深色主题用低饱和暗色
-        long n = _receive.Counter;
-        _statusStrip.BackColor = n switch
-        {
-            >= 2_000_000 => Color.FromArgb(82, 38, 38),
-            >= 1_000_000 => Color.FromArgb(78, 46, 34),
-            >= 500_000 => Color.FromArgb(66, 50, 34),
-            >= 200_000 => Color.FromArgb(54, 48, 34),
-            _ => Theme.Surface2,
-        };
+        // 状态栏底色随接收计数分档（规格：20 万/50 万/100 万/200 万）
+        _statusStrip.BackColor = Theme.StatusBackground(_receive.Counter);
 
         // 复选框高亮（规格：勾选时黄，否则系统色；加回车换行在 HEX发送 勾选时不亮）
         Highlight(_hexDisplayBox, _hexDisplayBox.Checked);
@@ -1947,7 +1955,7 @@ public sealed class MainForm : Form
 
         // 校验组：模式 None(0) 时白底、否则黄底（标签跟随）
         bool verifying = _verifyBox.SelectedIndex > 0;
-        Color verifyBack = verifying ? Color.FromArgb(38, 36, 27) : Theme.Field;
+        Color verifyBack = verifying ? Theme.VerifyField : Theme.Field;
         _verifyNumEdit.BackColor = verifyBack;
         _tailCombo.BackColor = verifyBack;
         _verifyBox.BackColor = verifyBack;
@@ -2482,6 +2490,29 @@ public sealed class MainForm : Form
         _collapseButton.Text = show ? "━" : "■";
     }
 
+    /// <summary>切换深/浅主题；不自动保存，调用方决定（菜单点击会 AutoSave，启动/导入不保存）。</summary>
+    private void ApplyTheme(bool light)
+    {
+        if (_lightThemeItem is not null) _lightThemeItem.Checked = light;
+        Theme.ApplyTheme(this, light);
+
+        _recvBox.BackColor = Theme.Log;
+        _recvBox.ForeColor = Theme.Text;
+        _sendBox.BackColor = Theme.Field;
+        _sendBox.ForeColor = Theme.Text;
+        _filePathBox.BackColor = Theme.Field;
+        _filePathBox.ForeColor = Theme.Muted;
+        _crcBox.BackColor = Theme.Field;
+        _crcBox.ForeColor = Theme.Accent;
+
+        _connStatus.ForeColor = Theme.Text;
+        _sentStatus.ForeColor = Theme.StatusSend;
+        _recvStatus.ForeColor = Theme.Accent;
+        _modemStatus.ForeColor = Theme.Muted;
+        StatusTick();
+        UpdateStatus();
+    }
+
     private void UpdateStatus()
     {
         if (_netMode == NetMode.Serial)
@@ -2819,6 +2850,7 @@ public sealed class MainForm : Form
             FontSize = _recvBox.Font.Size.ToString(System.Globalization.CultureInfo.InvariantCulture),
             FontStyle = (int)_recvBox.Font.Style,
             FontColor = _recvBox.ForeColor.ToArgb(),
+            ThemeLight = Theme.IsLight,
             Language = "C",
         };
         if (_hexSendBox.Checked) snap.HexText = _sendBox.Text;
@@ -2839,6 +2871,9 @@ public sealed class MainForm : Form
         _loading = true;
         try
         {
+            if (Theme.IsLight != snap.ThemeLight)
+                ApplyTheme(snap.ThemeLight);
+
             for (int i = 0; i < IniDocument.MultiRowCount; i++)
             {
                 _rowOrder[i].Text = snap.Order[i];

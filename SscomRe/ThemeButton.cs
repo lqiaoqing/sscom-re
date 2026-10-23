@@ -123,7 +123,7 @@ internal sealed class ThemeButton : Button
             using GraphicsPath path = Theme.RoundedRect(bounds, radius);
             if (Kind == ButtonKind.Primary && back.A == 255)
             {
-                using var gradient = new LinearGradientBrush(bounds, Theme.AccentBright, Theme.Hex("#27B9AA"), 90F);
+                using var gradient = new LinearGradientBrush(bounds, Theme.AccentBright, Theme.AccentDeep, 90F);
                 g.FillPath(gradient, path);
             }
             else

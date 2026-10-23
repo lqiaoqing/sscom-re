@@ -46,8 +46,8 @@ internal sealed class ThemeCheckBox : CheckBox
         {
             Rectangle warm = Rectangle.Inflate(client, -1, -1);
             using GraphicsPath warmPath = Theme.RoundedRect(warm, Theme.Scale(this, 4));
-            using var fill = new SolidBrush(Theme.WithAlpha(20, Theme.Amber));
-            using var edge = new Pen(Theme.WithAlpha(44, Theme.Amber), 1);
+            using var fill = new SolidBrush(Theme.WithAlpha(Theme.WarmFillAlpha, Theme.Amber));
+            using var edge = new Pen(Theme.WithAlpha(Theme.WarmBorderAlpha, Theme.Amber), 1);
             g.FillPath(fill, warmPath);
             g.DrawPath(edge, warmPath);
         }
@@ -61,9 +61,9 @@ internal sealed class ThemeCheckBox : CheckBox
         var box = new Rectangle(boxX, boxY, boxSize, boxSize);
         using (GraphicsPath boxPath = Theme.RoundedRect(box, radius))
         {
-            using var fill = new SolidBrush(Checked ? Theme.Amber : Theme.Hex("#0C141F"));
+            using var fill = new SolidBrush(Checked ? Theme.Amber : Theme.CheckFill);
             g.FillPath(fill, boxPath);
-            using var edge = new Pen(Checked ? Theme.Hex("#FFD08A") : Theme.Hex("#4A5C74"), 1);
+            using var edge = new Pen(Checked ? Theme.CheckActiveBorder : Theme.CheckBorder, 1);
             g.DrawPath(edge, boxPath);
         }
         if (Checked)
@@ -88,7 +88,7 @@ internal sealed class ThemeCheckBox : CheckBox
         {
             int textX = box.Right + Theme.Scale(this, 6);
             var textRect = new Rectangle(textX, 0, Math.Max(1, ClientSize.Width - textX), ClientSize.Height);
-            Color fore = !Enabled ? Theme.Dim : lit ? Theme.Hex("#E7CFA9") : Theme.Muted;
+            Color fore = !Enabled ? Theme.Dim : lit ? Theme.AmberText : Theme.Muted;
             TextRenderer.DrawText(g, Text, Font, textRect, fore,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }

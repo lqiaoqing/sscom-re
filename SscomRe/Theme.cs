@@ -7,31 +7,130 @@ using System.Windows.Forms;
 namespace SscomRe;
 
 /// <summary>
-/// 深色主题的配色、字体、DPI 尺寸与通用绘制工具。
+/// 主题配色、字体、DPI 尺寸与通用绘制工具。深/浅两套 palette 通过菜单切换。
 /// 布局仍按原程序的物理像素约定；自绘控件只使用这里的颜色和按字体推导的尺寸。
 /// </summary>
 internal static class Theme
 {
-    public static readonly Color Canvas = Hex("#0B1119");
-    public static readonly Color Surface = Hex("#101620");
-    public static readonly Color Surface2 = Hex("#0D131C");
-    public static readonly Color Raised = Hex("#151D28");
-    public static readonly Color Hover = Hex("#1B2532");
-    public static readonly Color Pressed = Hex("#202C3B");
-    public static readonly Color Border = Hex("#2C3A4E");
-    public static readonly Color BorderSoft = Hex("#202B3B");
-    public static readonly Color Field = Hex("#0B121B");
-    public static readonly Color Log = Hex("#0A1018");
-    public static readonly Color Text = Hex("#DBE4EE");
-    public static readonly Color Muted = Hex("#A7B5C6");
-    public static readonly Color Dim = Hex("#73859B");
-    public static readonly Color Accent = Hex("#2FC9B9");
-    public static readonly Color AccentBright = Hex("#45E0CD");
-    public static readonly Color AccentInk = Hex("#062B28");
-    public static readonly Color Amber = Hex("#F0B45A");
-    public static readonly Color AmberInk = Hex("#2B1B05");
-    public static readonly Color Danger = Hex("#FF7272");
-    public static readonly Color Green = Hex("#4ADE80");
+    private static readonly ThemePalette DarkPalette = new()
+    {
+        IsDark = true,
+        Canvas = Hex("#0B1119"),
+        Surface = Hex("#101620"),
+        Surface2 = Hex("#0D131C"),
+        Raised = Hex("#151D28"),
+        Hover = Hex("#1B2532"),
+        Pressed = Hex("#202C3B"),
+        Border = Hex("#2C3A4E"),
+        BorderSoft = Hex("#202B3B"),
+        Field = Hex("#0B121B"),
+        Log = Hex("#0A1018"),
+        Text = Hex("#DBE4EE"),
+        Muted = Hex("#A7B5C6"),
+        Dim = Hex("#73859B"),
+        Accent = Hex("#2FC9B9"),
+        AccentBright = Hex("#45E0CD"),
+        AccentDeep = Hex("#27B9AA"),
+        AccentInk = Hex("#062B28"),
+        Amber = Hex("#F0B45A"),
+        AmberInk = Hex("#2B1B05"),
+        AmberText = Hex("#E7CFA9"),
+        StatusSend = Hex("#F0B45A"),
+        CheckFill = Hex("#0C141F"),
+        CheckBorder = Hex("#4A5C74"),
+        CheckActiveBorder = Hex("#FFD08A"),
+        Danger = Hex("#FF7272"),
+        Green = Hex("#4ADE80"),
+        VerifyField = Color.FromArgb(38, 36, 27),
+        StatusCritical = Color.FromArgb(82, 38, 38),
+        StatusHigh = Color.FromArgb(78, 46, 34),
+        StatusMid = Color.FromArgb(66, 50, 34),
+        StatusLow = Color.FromArgb(54, 48, 34),
+        WarmFillAlpha = 20,
+        WarmBorderAlpha = 44,
+    };
+
+    private static readonly ThemePalette LightPalette = new()
+    {
+        IsDark = false,
+        Canvas = Hex("#EEF3F8"),
+        Surface = Hex("#FFFFFF"),
+        Surface2 = Hex("#E8EEF5"),
+        Raised = Hex("#DDE7F1"),
+        Hover = Hex("#E9F1F8"),
+        Pressed = Hex("#D6E3F0"),
+        Border = Hex("#C7D4E2"),
+        BorderSoft = Hex("#DCE5EF"),
+        Field = Hex("#FFFFFF"),
+        Log = Hex("#FBFDFF"),
+        Text = Hex("#17232E"),
+        Muted = Hex("#4F6275"),
+        Dim = Hex("#7A8B9C"),
+        Accent = Hex("#0B8A7E"),
+        AccentBright = Hex("#12A697"),
+        AccentDeep = Hex("#086B62"),
+        AccentInk = Hex("#FFFFFF"),
+        Amber = Hex("#E0A340"),
+        AmberInk = Hex("#2B1B05"),
+        AmberText = Hex("#6F4A12"),
+        StatusSend = Hex("#8A5A00"),
+        CheckFill = Hex("#FFFFFF"),
+        CheckBorder = Hex("#9FB0C2"),
+        CheckActiveBorder = Hex("#C98A2E"),
+        Danger = Hex("#C43D3D"),
+        Green = Hex("#1C8F52"),
+        VerifyField = Hex("#F6ECD9"),
+        StatusCritical = Hex("#F6D7D7"),
+        StatusHigh = Hex("#F9E2D5"),
+        StatusMid = Hex("#FAEBD9"),
+        StatusLow = Hex("#FCF3E4"),
+        WarmFillAlpha = 30,
+        WarmBorderAlpha = 70,
+    };
+
+    public static ThemePalette Current { get; private set; } = DarkPalette;
+    public static bool IsLight => !Current.IsDark;
+
+    public static void SetLight(bool light) => Current = light ? LightPalette : DarkPalette;
+
+    public static Color Canvas => Current.Canvas;
+    public static Color Surface => Current.Surface;
+    public static Color Surface2 => Current.Surface2;
+    public static Color Raised => Current.Raised;
+    public static Color Hover => Current.Hover;
+    public static Color Pressed => Current.Pressed;
+    public static Color Border => Current.Border;
+    public static Color BorderSoft => Current.BorderSoft;
+    public static Color Field => Current.Field;
+    public static Color Log => Current.Log;
+    public static Color Text => Current.Text;
+    public static Color Muted => Current.Muted;
+    public static Color Dim => Current.Dim;
+    public static Color Accent => Current.Accent;
+    public static Color AccentBright => Current.AccentBright;
+    public static Color AccentDeep => Current.AccentDeep;
+    public static Color AccentInk => Current.AccentInk;
+    public static Color Amber => Current.Amber;
+    public static Color AmberInk => Current.AmberInk;
+    public static Color AmberText => Current.AmberText;
+    public static Color StatusSend => Current.StatusSend;
+    public static Color CheckFill => Current.CheckFill;
+    public static Color CheckBorder => Current.CheckBorder;
+    public static Color CheckActiveBorder => Current.CheckActiveBorder;
+    public static Color Danger => Current.Danger;
+    public static Color Green => Current.Green;
+    public static Color VerifyField => Current.VerifyField;
+    public static int WarmFillAlpha => Current.WarmFillAlpha;
+    public static int WarmBorderAlpha => Current.WarmBorderAlpha;
+
+    public static Color StatusBackground(long count) => count switch
+    {
+        >= 2_000_000 => Current.StatusCritical,
+        >= 1_000_000 => Current.StatusHigh,
+        >= 500_000 => Current.StatusMid,
+        >= 200_000 => Current.StatusLow,
+        _ => Current.Surface2,
+    };
 
     public static Color Hex(string value) => ColorTranslator.FromHtml(value);
 
@@ -149,8 +248,8 @@ internal static class Theme
     {
         try
         {
-            int on = 1;
-            // Win10 1809–1909 用 19，之后的版本用 20
+            int on = Current.IsDark ? 1 : 0;
+            // Win10 1809–1909 用 19，之后的版本用 20；浅色主题显式写 0
             if (DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref on, sizeof(int)) != 0)
                 DwmSetWindowAttribute(hwnd, 19, ref on, sizeof(int));
             int round = DWMWCP_ROUND;
@@ -168,10 +267,90 @@ internal static class Theme
     [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
     private static extern int SetWindowTheme(IntPtr hwnd, string? subAppName, string? subIdList);
 
-    /// <summary>尽量把原生滚动条/下拉箭头切到深色；不支持时静默忽略。</summary>
+    /// <summary>按当前主题切换原生滚动条/下拉箭头；不支持时静默忽略。</summary>
     public static void TryDarkNative(IntPtr hwnd)
     {
-        try { SetWindowTheme(hwnd, "DarkMode_Explorer", null); } catch { }
+        try { SetWindowTheme(hwnd, Current.IsDark ? "DarkMode_Explorer" : null, null); } catch { }
+    }
+
+    /// <summary>运行时切换主题：DWM、控件配色、菜单/状态栏、原生子控件一起刷新。</summary>
+    public static void ApplyTheme(Form form, bool light)
+    {
+        ThemePalette old = Current;
+        SetLight(light);
+        ApplyWindow(form);
+        Recolor(form, old, Current);
+        StyleRecursive(form);
+        if (form.MainMenuStrip is not null) StyleMenu(form.MainMenuStrip);
+        foreach (Control control in AllControls(form))
+            if (control is StatusStrip status) StyleStatus(status);
+        RefreshNative(form);
+        form.Invalidate(true);
+    }
+
+    private static IEnumerable<Control> AllControls(Control root)
+    {
+        foreach (Control child in root.Controls)
+        {
+            yield return child;
+            foreach (Control nested in AllControls(child))
+                yield return nested;
+        }
+    }
+
+    /// <summary>把显式写成旧 palette 颜色的面板/标签换成新 palette 颜色。</summary>
+    private static void Recolor(Control control, ThemePalette old, ThemePalette now)
+    {
+        if (control.BackColor.A == 255)
+        {
+            Color mapped = Map(control.BackColor, old, now);
+            if (mapped != control.BackColor) control.BackColor = mapped;
+        }
+        Color fore = Map(control.ForeColor, old, now);
+        if (fore != control.ForeColor) control.ForeColor = fore;
+        foreach (Control child in control.Controls) Recolor(child, old, now);
+    }
+
+    private static Color Map(Color color, ThemePalette old, ThemePalette now)
+    {
+        if (color == old.Canvas) return now.Canvas;
+        if (color == old.Surface) return now.Surface;
+        if (color == old.Surface2) return now.Surface2;
+        if (color == old.Raised) return now.Raised;
+        if (color == old.Hover) return now.Hover;
+        if (color == old.Pressed) return now.Pressed;
+        if (color == old.Border) return now.Border;
+        if (color == old.BorderSoft) return now.BorderSoft;
+        if (color == old.Field) return now.Field;
+        if (color == old.Log) return now.Log;
+        if (color == old.Text) return now.Text;
+        if (color == old.Muted) return now.Muted;
+        if (color == old.Dim) return now.Dim;
+        if (color == old.Accent) return now.Accent;
+        if (color == old.AccentBright) return now.AccentBright;
+        if (color == old.AccentDeep) return now.AccentDeep;
+        if (color == old.AccentInk) return now.AccentInk;
+        if (color == old.Amber) return now.Amber;
+        if (color == old.AmberInk) return now.AmberInk;
+        if (color == old.AmberText) return now.AmberText;
+        if (color == old.StatusSend) return now.StatusSend;
+        if (color == old.CheckFill) return now.CheckFill;
+        if (color == old.CheckBorder) return now.CheckBorder;
+        if (color == old.CheckActiveBorder) return now.CheckActiveBorder;
+        if (color == old.Danger) return now.Danger;
+        if (color == old.Green) return now.Green;
+        if (color == old.VerifyField) return now.VerifyField;
+        if (color == old.StatusCritical) return now.StatusCritical;
+        if (color == old.StatusHigh) return now.StatusHigh;
+        if (color == old.StatusMid) return now.StatusMid;
+        if (color == old.StatusLow) return now.StatusLow;
+        return color;
+    }
+
+    private static void RefreshNative(Control root)
+    {
+        if (root.IsHandleCreated) TryDarkNative(root.Handle);
+        foreach (Control child in root.Controls) RefreshNative(child);
     }
 
     public static void StyleMenu(MenuStrip menu)
@@ -237,7 +416,7 @@ internal static class Theme
         strip.Renderer = new ThemeStatusRenderer();
     }
 
-    /// <summary>给尚未替换成自绘类的控件兜底，保证对话框和遗漏控件也是深色。</summary>
+    /// <summary>按当前主题刷新控件配色；自绘控件只重绘，原生控件补底色。</summary>
     public static void StyleRecursive(Control root)
     {
         StyleOne(root);
@@ -248,8 +427,24 @@ internal static class Theme
     {
         switch (control)
         {
-            case ThemeButton or ThemeCheckBox or ThemeComboBox or ThemeTextBox:
-                return;
+            case ThemeButton button:
+                button.ForeColor = Muted;
+                button.Invalidate();
+                break;
+            case ThemeCheckBox check:
+                check.ForeColor = Muted;
+                check.Invalidate();
+                break;
+            case ThemeComboBox themeCombo:
+                themeCombo.BackColor = Field;
+                themeCombo.ForeColor = Text;
+                themeCombo.Invalidate();
+                break;
+            case ThemeTextBox themeBox:
+                themeBox.BackColor = (themeBox.Tag as string) == "log" ? Log : Field;
+                themeBox.ForeColor = themeBox.ReadOnly ? Muted : Text;
+                themeBox.Invalidate();
+                break;
             case Label label:
                 label.ForeColor = Muted;
                 label.BackColor = Color.Transparent;
@@ -284,6 +479,7 @@ internal static class Theme
             case Panel or FlowLayoutPanel or TableLayoutPanel:
                 if (control.BackColor == SystemColors.Control || control.BackColor == SystemColors.Window)
                     control.BackColor = Surface;
+                control.Invalidate();
                 break;
         }
     }
@@ -292,7 +488,18 @@ internal static class Theme
     private static extern bool DestroyIcon(IntPtr handle);
 }
 
-/// <summary>深色菜单/下拉/提示条的配色表。</summary>
+/// <summary>一套完整的主题颜色；Theme 通过 Current 在深/浅之间切换。</summary>
+internal sealed class ThemePalette
+{
+    public bool IsDark;
+    public Color Canvas, Surface, Surface2, Raised, Hover, Pressed, Border, BorderSoft, Field, Log;
+    public Color Text, Muted, Dim, Accent, AccentBright, AccentDeep, AccentInk;
+    public Color Amber, AmberInk, AmberText, StatusSend, CheckFill, CheckBorder, CheckActiveBorder, Danger, Green, VerifyField;
+    public Color StatusCritical, StatusHigh, StatusMid, StatusLow;
+    public int WarmFillAlpha, WarmBorderAlpha;
+}
+
+/// <summary>菜单/下拉/提示条的配色表。</summary>
 internal sealed class ThemeColorTable : ProfessionalColorTable
 {
     public ThemeColorTable() => UseSystemColors = false;

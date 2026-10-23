@@ -1,7 +1,7 @@
 # 交接文档：SscomRe（SSCOM 5.13.1 的 C# 重写）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前状态（2026-10-23）：**M1–M9 全部实现，UI Phase 1 深色主题已接入，`--selftest` 182/182 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前状态（2026-10-23）：**M1–M9 全部实现，UI Phase 1 深/浅双主题已接入，`--selftest` 185/185 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -48,7 +48,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   PortSettingsDialog.cs 自建「更多串口设置」对话框
   WindowPlacement.cs    N1082–N1085 窗口几何夹取
   InputNormalizer.cs    行内数字框归一化（光标规则）
-  SelfTest.cs           --selftest 用例（当前 182 项）
+  SelfTest.cs           --selftest 用例（当前 185 项）
 ```
 
 ---
@@ -66,12 +66,12 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 | M7 终端仿真 + 更多串口设置 | ✅ 已建；按键顺序/退格/吞键/GBK 各有自检 |
 | M8 sscom51.ini 保存/导入 | ✅ 已建；含往返与旧格式兼容自检 |
 | M9 窗口几何/字体背景色/发布 | ✅ 已建；几何夹取/字体应用有自检 |
-| UI Phase 1 深色主题（换皮，不重排） | ✅ 已建；DWM 深色标题栏、自绘控件、暗色菜单/下拉/滚动条、自绘多条分页 |
+| UI Phase 1 深/浅主题（换皮，不重排） | ✅ 已建；DWM 深/浅标题栏、自绘控件、暗色菜单/下拉/滚动条、自绘多条分页、N1092 记忆 |
 
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `SscomRe.exe --selftest` → `pass=182 fail=0`
+- `SscomRe.exe --selftest` → `pass=185 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境无真实 COM 口，串口/网络的实机收发热路径仍需在目标硬件上复验
 
@@ -85,7 +85,7 @@ dotnet build -c Release
 # 输出固定为 SscomRe/bin/net48/SscomRe.exe（csproj 固定 OutputPath）
 
 cd bin/net48
-./SscomRe.exe --selftest          # 必须 pass=182 fail=0
+./SscomRe.exe --selftest          # 必须 pass=185 fail=0
 
 # 冒烟：跑 ≥5 秒，检查没崩
 rm -f crash.log
@@ -150,9 +150,17 @@ taskkill //IM SscomRe.exe //F
 - 接收框 `WordWrap = true`、`ScrollBars.Vertical`；追加走 `_displayTimer`（30ms 合并）；在底部时跟随，向上翻看历史时保持滚动/光标。
 - 高 DPI：物理像素布局 + 放大字体在 200% 缩放下会把底栏撑得很大，接收区变窄；自检已按 `DeviceDpi` 缩放测试窗口，但界面本身没有做完整的 DPI 自适应布局。改动布局时在 100% 和 200% 下都要看。
 
-### 5.6 深色主题 / 自绘控件（Phase 1）
+### 5.6 深/浅主题 / 自绘控件（Phase 1）
 
-- 入口：`Theme.ApplyWindow(this)` + `Theme.StyleRecursive(this)` 在 `MainForm` 构造末尾调用；前者设窗口底色、DWM 深色标题栏/圆角、窗口图标，后者给遗漏的原生控件兜底。
+- 调色板：`Theme.Current` 指向 `DarkPalette` 或 `LightPalette`；`Theme.Canvas` 等属性都转发到当前 palette，自绘控件绘制时读实时值，所以切换只需重绘。
+- 启动：`MainForm` 构造最开始用 `IniDocument.ReadThemePreference` 读 `N1092`，`Theme.SetLight` 后再 `BuildUi`，避免先深色再整树换色。
+- 运行时：菜单「显示 → 浅色主题」→ `ApplyTheme(bool)` → `Theme.ApplyTheme(form, light)`：切换 palette、DWM（`on=0/1`）、颜色映射、菜单/状态栏渲染器、原生控件主题，最后 `StatusTick` 刷新计数底色。菜单点击会 `AutoSave`，启动/导入不保存。
+- `N1092` 是重写版新增键（`0` 深色、`1` 浅色），原版不认识但会忽略；`IniSnapshot.ThemeLight` 默认 false。
+- 颜色映射：`Theme.Recolor` 把显式写成旧 palette 颜色的面板/标签换新；`StyleRecursive` 刷新自绘控件和原生控件。新增容器若用了 palette 外的手写颜色，切换时不会自动更新，别这么写。
+- 原生控件主题：`TryDarkNative` 在深色用 `DarkMode_Explorer`，浅色用 `null` 恢复系统浅色滚动条；`RefreshNative` 在切换时遍历已创建句柄。
+- 状态栏分档底色用 `Theme.StatusBackground`，发送计数颜色用 `Theme.StatusSend`，校验区底色用 `Theme.VerifyField`；不要再写死 RGB。
+- 切换主题会重置接收区背景/文字颜色为主题默认值（字号/字形保留）；`ApplySnapshot` 导入 ini 时先切主题、再套 ini 里的颜色，所以导入的 ini 颜色仍生效。
+- 入口：`Theme.ApplyWindow(this)` + `Theme.StyleRecursive(this)` 在 `MainForm` 构造末尾调用；前者设窗口底色、DWM 深/浅标题栏/圆角、窗口图标，后者给原生控件兜底。
 - **`ToolStrip.RenderMode` 必须在 `Renderer` 之前设置**：先设 Renderer 再设 RenderMode 会被系统默认渲染器覆盖（菜单勾选/白边问题就是这么来的）。菜单用 `ThemeMenuRenderer`，状态栏用 `ThemeStatusRenderer`。
 - 菜单勾选：原生勾选列在深色下是白底，已设 `ShowImageMargin=false`/`ShowCheckMargin=false`，用 `✓  ` 文本前缀表示勾选（`Theme.ApplyMenuCheckText`，监听 `CheckedChanged`）。菜单项 Text 会变，逻辑判断请用 `Tag`/`Checked`，不要用 Text 比对。
 - 下拉框：原生下拉按钮是浅色方块，`ThemeComboBox` 在 `WM_PAINT` 之后用 `GetComboBoxInfo` 的 `rcButton` 覆盖箭头和边框；`OnDropDown` 时隐藏列表原生滚动条并按项数设置高度。不要改回标准 ComboBox。
@@ -188,6 +196,10 @@ taskkill //IM SscomRe.exe //F
 | 原生 TabControl 的页框/标签条在深色下始终有浅色边 | 多条面板改用自绘分段按钮 + 页面 Panel，不再用 TabControl |
 | 自绘按钮和原生下拉框比行高多 2–4px → 200% DPI 下被行裁切 | 按钮高度用 `Font.Height+12`；底栏设置行额外 +4px |
 | `Theme.MonoFont` 返回共享 Font → `ApplyRecvFont` 释放旧字体时影响发送框 | 每次返回新 Font 实例，不共享 |
+| 运行时只改 `Theme.Current` 不重绘 → 控件还是旧色 | 必须走 `ApplyTheme` → `Theme.ApplyTheme`（含颜色映射和原生控件主题刷新） |
+| 浅色主题沿用 `on=1` 的 DWM 属性 → 标题栏仍是深色 | `ApplyChrome` 按 `Current.IsDark` 写 0/1；切换时重设 |
+| 浅色主题下原生滚动条仍是深色 | `TryDarkNative` 在浅色传 `null` 恢复系统主题，并由 `RefreshNative` 遍历已有句柄 |
+| 状态栏发送色/校验区底色写死深色 RGB → 浅色下看不清 | 用 `Theme.StatusSend`、`Theme.StatusBackground`、`Theme.VerifyField` |
 
 ---
 
@@ -200,7 +212,8 @@ taskkill //IM SscomRe.exe //F
 - 校验模式 7（ADD16）的字节序按规格标为推断：低字节在前。
 - 打开文件预览用原字节直接按 Latin-1 式字符累积文本，再经 `ReceiveDisplay.SetPreviewBuffers` 替换预览缓冲；原始接收缓冲和接收计数不动。
 - 网络服务端本地端口非法时选择“提示后不启动”（规格此处原程序响应未细读）。
-- Phase 1 主题只换皮：接收日志仍是普通 `TextBox`（单色），RX/TX 分色等富文本效果留给 Phase 2；标题栏用 DWM 深色原生方案，完全自绘标题栏也留到 Phase 2。
+- Phase 1 主题只换皮：接收日志仍是普通 `TextBox`（单色），RX/TX 分色等富文本效果留给 Phase 2。
+- 标题栏用 DWM 深/浅原生方案，完全自绘标题栏留到 Phase 2；浅色模式下系统文件/字体/颜色对话框观感正常，深色模式下这些原生对话框仍是浅色。
 - 打开/保存文件、字体、颜色、MessageBox 是系统原生浅色对话框，未做深色包装。
 - 200% DPI + 窄屏（如 1440×900）下底栏会换行并超出窗口；设计窗口宽度约 2800 物理像素（或 100%–150% 缩放）时正常。
 

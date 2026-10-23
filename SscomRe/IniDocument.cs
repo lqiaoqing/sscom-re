@@ -92,6 +92,7 @@ public static class IniDocument
         Setting(sb, "窗口字体大小", 1089, snap.FontSize);
         Setting(sb, "窗口字体颜色", 1090, snap.FontColor.ToString(CultureInfo.InvariantCulture));
         Setting(sb, "窗口字体样式", 1091, snap.FontStyle.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "主题(0=深色,1=浅色)", 1092, snap.ThemeLight ? "1" : "0");
         Setting(sb, "C:Chinese汉语, E:English", 1100, "C");
         sb.Append(";end\r\n");
         return sb.ToString();
@@ -205,6 +206,19 @@ public static class IniDocument
 
     public static string ReadFile(string path) => File.ReadAllText(path, Gbk);
 
+    /// <summary>启动早期只取主题偏好，避免先按深色建好控件再整体换色。</summary>
+    public static bool ReadThemePreference(string path)
+    {
+        try
+        {
+            return File.Exists(path) && Load(ReadFile(path)).ThemeLight;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static void ApplySetting(IniSnapshot snap, int key, string value)
     {
         switch (key)
@@ -270,6 +284,7 @@ public static class IniDocument
                 if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int fontStyle))
                     snap.FontStyle = fontStyle;
                 break;
+            case 1092: snap.ThemeLight = IsOn(value); break;
             case 1100:
                 snap.Language = value;
                 break;
@@ -357,5 +372,7 @@ public sealed class IniSnapshot
     public int FontColor { get; set; } = Theme.Text.ToArgb();
     /// <summary>FontStyle 标志：1 粗体、2 斜体、4 下划线、8 删除线。原程序不记这项，缺省为 0。</summary>
     public int FontStyle { get; set; }
+    /// <summary>N1092：0 深色、1 浅色；这是重写版新增键，原版没有。</summary>
+    public bool ThemeLight { get; set; }
     public string Language { get; set; } = "C";
 }
