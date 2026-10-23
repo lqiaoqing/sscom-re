@@ -162,6 +162,22 @@ public static class SendComposer
     /// <summary>文件名用时间戳（对应原程序把 DateTimeToStr 结果里的 : 空格 / \ 换成 - 或 _）。</summary>
     public static string FileTimestamp() => DateTime.Now.ToString("yyyy_MM_dd_HH-mm-ss");
 
+    /// <summary>
+    /// 打开文件预览：十六进制用无空格的两个大写字符；文本按 GBK 解码并丢弃 0x00。
+    /// </summary>
+    public static (string Hex, string Text) FilePreview(byte[] data)
+    {
+        const string digits = "0123456789ABCDEF";
+        var hex = new StringBuilder(data.Length * 2);
+        var textBytes = new List<byte>(data.Length);
+        foreach (byte b in data)
+        {
+            hex.Append(digits[b >> 4]).Append(digits[b & 0x0F]);
+            if (b != 0) textBytes.Add(b);
+        }
+        return (hex.ToString(), DecodeGbk(textBytes.ToArray()));
+    }
+
     /// <summary>字节串 → 两个大写十六进制字符加一个空格（与接收显示同一格式）。</summary>
     public static string HexText(byte[] data)
     {

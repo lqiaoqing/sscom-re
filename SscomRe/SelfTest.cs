@@ -36,6 +36,9 @@ internal static class SelfTest
         Check("hex 换行分隔", SendComposer.ComposeHex("12\r\n34", out _, out _), "12 34");
         Check("hex 非法字符整段不发", SendComposer.ComposeHex("12 GG", out _, out _), "null");
         Check("hex 空串", SendComposer.ComposeHex("", out _, out _), "");
+        var preview = SendComposer.FilePreview([0xD6, 0xD0, 0x00, 0x41]);
+        CheckText("文件预览 HEX", preview.Hex, "D6D00041");
+        CheckText("文件预览 GBK 文本", preview.Text, "中A");
 
         // —— 校验算法（1..7 的已知向量，"123456789"） ——
         var ascii = Encoding.ASCII.GetBytes("123456789");
@@ -522,12 +525,14 @@ internal static class SelfTest
         // —— 主窗体：接收区占大头，选项保持一行，发送框是矮条 ——
         {
             string ini = Path.Combine(AppContext.BaseDirectory, "sscom51.ini");
-            bool hadIni = File.Exists(ini);
+            byte[]? iniBackup = File.Exists(ini) ? File.ReadAllBytes(ini) : null;
             using var form = new MainForm();
             form.StartPosition = FormStartPosition.Manual;
             form.Location = new Point(-24000, -24000);
-            form.Size = new Size(1200, 720);
             form.Show();
+            // 布局尺寸是物理像素，字体随 DPI 放大；按 96 DPI 的等效尺寸开窗，测试才与缩放无关。
+            int scale = Math.Max(96, form.DeviceDpi);
+            form.Size = new Size(1200 * scale / 96, 720 * scale / 96);
             Application.DoEvents();
             TextBox? send = null;
             TextBox? recv = null;
@@ -556,7 +561,7 @@ internal static class SelfTest
                 CheckText("校验框在窗口内", right <= limit ? "yes" : "no", "yes");
             }
             int sendAt720 = send?.Height ?? 0;
-            form.Size = new Size(1200, 980);
+            form.Size = new Size(1200 * scale / 96, 980 * scale / 96);
             Application.DoEvents();
             CheckText("拉高窗口发送框不跟着长", send is not null && Math.Abs(send.Height - sendAt720) <= 4 ? "yes" : "no", "yes");
 
@@ -666,7 +671,9 @@ internal static class SelfTest
                 CheckText("三页共297条", dataBoxes.ToString(), "297");
             }
             form.Close();
-            if (!hadIni && File.Exists(ini)) File.Delete(ini);
+            // Close 会保存测试中改过的字体/模式/几何；收尾时还原用户原配置。
+            if (iniBackup is not null) File.WriteAllBytes(ini, iniBackup);
+            else if (File.Exists(ini)) File.Delete(ini);
         }
 
         Console.WriteLine($"SELFTEST pass={_pass} fail={_fail}");

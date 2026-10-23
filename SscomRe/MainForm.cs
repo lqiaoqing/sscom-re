@@ -5,8 +5,8 @@ using System.Runtime.InteropServices;
 namespace SscomRe;
 
 /// <summary>
-/// 主窗体（里程碑 M1：骨架 + 串口开关 + 状态栏）。
-/// 布局与文案按规格“界面结构与控件对照 / 状态栏 / 最前、扩展、━”设计，其余按钮先占位。
+/// 主窗体：串口/网络收发、多条字符串、终端仿真、ini 参数与界面编排。
+/// 布局与文案按规格“界面结构与控件对照 / 状态栏 / 最前、扩展、━”设计。
 /// </summary>
 public sealed class MainForm : Form
 {
@@ -1434,9 +1434,15 @@ public sealed class MainForm : Form
     {
         if (!_recvToFileBox.Checked)
             return;
-        string piece = _port.IsOpen
-            ? _port.OpenedPortName
-            : "COM";
+        string piece;
+        if (_netMode == NetMode.TcpClient) piece = "TCPCLIENT";
+        else if (_netMode == NetMode.TcpServer) piece = "TCPSERVER";
+        else if (_netMode == NetMode.Udp) piece = "UDP";
+        else
+        {
+            piece = _port.IsOpen ? _port.OpenedPortName : ComPortService.NormalizePortName(_portCombo.Text);
+            if (piece.Length == 0) piece = "COM";
+        }
         string name = Path.Combine(Directory.GetCurrentDirectory(),
             "ReceivedTofile-" + piece + SendComposer.FileTimestamp() + ".DAT");
         _recvFileName = name;
@@ -1530,19 +1536,13 @@ public sealed class MainForm : Form
             return;                                          // 打不开：静默返回
         }
 
-        // 逐字节：十六进制（两个字符无空格）、文本（0x00 丢弃）
-        var hex = new System.Text.StringBuilder(data.Length * 2);
-        var text = new System.Text.StringBuilder(data.Length);
-        foreach (byte b in data)
-        {
-            hex.Append(b.ToString("X2"));
-            if (b != 0) text.Append((char)b);
-        }
-        _receive.SetPreviewBuffers(hex.ToString(), text.ToString());
+        // 十六进制无空格；文本按原程序的 ANSI（GBK）显示，丢弃 0x00
+        var preview = SendComposer.FilePreview(data);
+        _receive.SetPreviewBuffers(preview.Hex, preview.Text);
 
         string header = "文件大小:" + fullSize
                         + "字节,下面是预览的前" + data.Length + "字节内容:\r\n\r\n";
-        AppendRecv(header + (_hexDisplayBox.Checked ? hex.ToString() : text.ToString()));
+        AppendRecv(header + (_hexDisplayBox.Checked ? preview.Hex : preview.Text));
     }
 
     private void ToggleOpen()
