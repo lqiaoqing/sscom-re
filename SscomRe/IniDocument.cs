@@ -22,6 +22,10 @@ public static class IniDocument
     public const string SaveFailedMessage = "无法保存ini文件!请拷贝exe文件到且它目录试试.";
     public const string ReadFailedMessage = "文件读取失败!";
 
+    public const int MultiPageCount = 3;
+    public const int MultiRowsPerPage = 99;
+    public const int MultiRowCount = MultiPageCount * MultiRowsPerPage;
+
     private static readonly Encoding Gbk = CreateGbk();
 
     public static string CurrentPath() =>
@@ -33,16 +37,21 @@ public static class IniDocument
         sb.Append(CommentHex).Append("\r\n");
         sb.Append(CommentNx).Append("\r\n");
 
-        for (int k = 1; k <= 99; k++)
+        for (int page = 0; page < MultiPageCount; page++)
         {
-            int i = k - 1;
-            sb.Append('N').Append(100 + k).Append('=')
-                .Append(Esc(snap.Order[i])).Append(',')
-                .Append(Esc(snap.Comment[i])).Append(',')
-                .Append(Esc(snap.Delay[i])).Append("\r\n");
-            sb.Append('N').Append(k).Append('=')
-                .Append(snap.Hex[i] ? 'H' : 'A').Append(',')
-                .Append(Esc(snap.Data[i])).Append("\r\n");
+            if (page > 0)
+                sb.Append(";第").Append(page + 1).Append("页\r\n");
+            for (int k = 1; k <= MultiRowsPerPage; k++)
+            {
+                int i = page * MultiRowsPerPage + (k - 1);
+                sb.Append('N').Append(MultiMetaKey(page, k)).Append('=')
+                    .Append(Esc(snap.Order[i])).Append(',')
+                    .Append(Esc(snap.Comment[i])).Append(',')
+                    .Append(Esc(snap.Delay[i])).Append("\r\n");
+                sb.Append('N').Append(MultiDataKey(page, k)).Append('=')
+                    .Append(snap.Hex[i] ? 'H' : 'A').Append(',')
+                    .Append(Esc(snap.Data[i])).Append("\r\n");
+            }
         }
 
         Setting(sb, "发送文件时每256字节延时时间ms", 1051, snap.SendFileDelayMs.ToString(CultureInfo.InvariantCulture));
@@ -82,6 +91,7 @@ public static class IniDocument
         Setting(sb, "窗口字体名称", 1088, snap.FontName);
         Setting(sb, "窗口字体大小", 1089, snap.FontSize);
         Setting(sb, "窗口字体颜色", 1090, snap.FontColor.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "窗口字体样式", 1091, snap.FontStyle.ToString(CultureInfo.InvariantCulture));
         Setting(sb, "C:Chinese汉语, E:English", 1100, "C");
         sb.Append(";end\r\n");
         return sb.ToString();
@@ -105,28 +115,27 @@ public static class IniDocument
             string payload = line.Substring(eq + 1);
             string[] parts = payload.Split(',');
 
-            if (key is >= 1 and <= 99)
+            if (TryMapMultiKey(key, out int index, out bool meta))
             {
-                int i = key - 1;
-                snap.Hex[i] = parts.Length > 0 && Unesc(parts[0]) == "H";
-                snap.Data[i] = parts.Length > 1 ? Unesc(string.Join(",", parts.Skip(1))) : "";
-                continue;
-            }
-
-            if (key is >= 101 and <= 199)
-            {
-                int i = key - 101;
-                string orderText = parts.Length > 0 ? Unesc(parts[0]) : "";
-                int order = int.TryParse(orderText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int o)
-                    ? Fx.Clamp(o, 0, 99) : 0;
-                snap.Order[i] = order.ToString(CultureInfo.InvariantCulture);
-                if (parts.Length >= 3)
-                    snap.Comment[i] = Unesc(string.Join(",", parts.Skip(1).Take(parts.Length - 2)));
-                else if (parts.Length == 2)
-                    snap.Comment[i] = Unesc(parts[1]);
-                string delayText = parts.Length >= 3 ? Unesc(parts[parts.Length - 1]) : "";
-                snap.Delay[i] = int.TryParse(delayText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int d)
-                    ? d.ToString(CultureInfo.InvariantCulture) : "1000";
+                if (!meta)
+                {
+                    snap.Hex[index] = parts.Length > 0 && Unesc(parts[0]) == "H";
+                    snap.Data[index] = parts.Length > 1 ? Unesc(string.Join(",", parts.Skip(1))) : "";
+                }
+                else
+                {
+                    string orderText = parts.Length > 0 ? Unesc(parts[0]) : "";
+                    int order = int.TryParse(orderText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int o)
+                        ? Fx.Clamp(o, 0, 99) : 0;
+                    snap.Order[index] = order.ToString(CultureInfo.InvariantCulture);
+                    if (parts.Length >= 3)
+                        snap.Comment[index] = Unesc(string.Join(",", parts.Skip(1).Take(parts.Length - 2)));
+                    else if (parts.Length == 2)
+                        snap.Comment[index] = Unesc(parts[1]);
+                    string delayText = parts.Length >= 3 ? Unesc(parts[parts.Length - 1]) : "";
+                    snap.Delay[index] = int.TryParse(delayText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int d)
+                        ? d.ToString(CultureInfo.InvariantCulture) : "1000";
+                }
                 continue;
             }
 
@@ -134,6 +143,48 @@ public static class IniDocument
             ApplySetting(snap, key, value);
         }
         return snap;
+    }
+
+    /// <summary>
+    /// 第 1 页沿用原来的 N1–N99（数据）和 N101–N199（顺序、注释、延时）。
+    /// 第 2 页是 N201–N299 / N301–N399，第 3 页是 N401–N499 / N501–N599。
+    /// </summary>
+    public static int MultiDataKey(int page, int row) => page switch
+    {
+        0 => row,
+        1 => 200 + row,
+        _ => 400 + row,
+    };
+
+    public static int MultiMetaKey(int page, int row) => page switch
+    {
+        0 => 100 + row,
+        1 => 300 + row,
+        _ => 500 + row,
+    };
+
+    public static bool TryMapMultiKey(int key, out int index, out bool meta)
+    {
+        for (int page = 0; page < MultiPageCount; page++)
+        {
+            int dataBase = MultiDataKey(page, 0);
+            int metaBase = MultiMetaKey(page, 0);
+            if (key > dataBase && key <= dataBase + MultiRowsPerPage)
+            {
+                index = page * MultiRowsPerPage + (key - dataBase - 1);
+                meta = false;
+                return true;
+            }
+            if (key > metaBase && key <= metaBase + MultiRowsPerPage)
+            {
+                index = page * MultiRowsPerPage + (key - metaBase - 1);
+                meta = true;
+                return true;
+            }
+        }
+        index = 0;
+        meta = false;
+        return false;
     }
 
     /// <summary>整段按整数解析。0 或解析失败时整串是端口名；1 和 2 都选 TCPClient；3 选 UDP。</summary>
@@ -215,6 +266,10 @@ public static class IniDocument
                 if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int fc))
                     snap.FontColor = fc;
                 break;
+            case 1091:
+                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int fontStyle))
+                    snap.FontStyle = fontStyle;
+                break;
             case 1100:
                 snap.Language = value;
                 break;
@@ -248,11 +303,14 @@ public sealed class IniSnapshot
 {
     public IniSnapshot()
     {
-        Order = Enumerable.Repeat("0", 99).ToArray();
-        Comment = Enumerable.Range(1, 99).Select(i => i.ToString(CultureInfo.InvariantCulture)).ToArray();
-        Delay = Enumerable.Repeat("1000", 99).ToArray();
-        Hex = new bool[99];
-        Data = Enumerable.Repeat("", 99).ToArray();
+        int n = IniDocument.MultiRowCount;
+        Order = Enumerable.Repeat("0", n).ToArray();
+        Comment = new string[n];
+        for (int i = 0; i < n; i++)
+            Comment[i] = ((i % IniDocument.MultiRowsPerPage) + 1).ToString(CultureInfo.InvariantCulture);
+        Delay = Enumerable.Repeat("1000", n).ToArray();
+        Hex = new bool[n];
+        Data = Enumerable.Repeat("", n).ToArray();
     }
 
     public string[] Order { get; }
@@ -297,5 +355,7 @@ public sealed class IniSnapshot
     public string FontName { get; set; } = "Microsoft YaHei UI";
     public string FontSize { get; set; } = "9";
     public int FontColor { get; set; } = SystemColors.WindowText.ToArgb();
+    /// <summary>FontStyle 标志：1 粗体、2 斜体、4 下划线、8 删除线。原程序不记这项，缺省为 0。</summary>
+    public int FontStyle { get; set; }
     public string Language { get; set; } = "C";
 }

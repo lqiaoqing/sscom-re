@@ -135,6 +135,15 @@ internal static class SelfTest
             var p = new MultiSendPlanner { StartFlag = true };
             CheckText("全0(有数据)也停", p.Tick(rows).Kind.ToString(), "Stop");
         }
+        {
+            // 三页合成一张表：前 100 行顺序号为 0 不能把后面的有效行停掉
+            var rows = new List<(int, string, int)>();
+            for (int i = 0; i < 100; i++) rows.Add((0, "", i));
+            rows.Add((1, "go", 100));
+            var p = new MultiSendPlanner { StartFlag = true };
+            var s = p.Tick(rows);
+            CheckText("超过99行仍能发到后面", $"{s.Kind}:{s.Row}", "Send:100");
+        }
 
         // —— 行内数字框归一化（顺序/延时） ——
         {
@@ -424,6 +433,16 @@ internal static class SelfTest
             snap.Order[0] = "2";
             snap.Delay[0] = "1500";
             snap.Hex[0] = true;
+            snap.FontName = "Consolas";
+            snap.FontSize = "16";
+            snap.FontStyle = (int)FontStyle.Bold | (int)FontStyle.Underline;
+            snap.FontColor = Color.FromArgb(255, 20, 30, 40).ToArgb();
+            snap.Data[99] = "第二页";
+            snap.Hex[99] = true;
+            snap.Comment[99] = "注2";
+            snap.Order[99] = "4";
+            snap.Data[198] = "第三页";
+            snap.Delay[198] = "2500";
 
             string t1 = IniDocument.Save(snap);
             CheckText("ini 含HEX注释", t1.Contains(IniDocument.CommentHex) ? "yes" : "no", "yes");
@@ -452,6 +471,19 @@ internal static class SelfTest
             CheckText("ini 还原数据", loaded.Data[0], "a,b\r\n中文");
             CheckText("ini 还原注释", loaded.Comment[0], "注,释\r\n");
             CheckText("ini 还原顺序", loaded.Order[0], "2");
+            CheckText("ini 第2页数据", loaded.Data[99], "第二页");
+            CheckText("ini 第2页HEX", loaded.Hex[99] ? "H" : "A", "H");
+            CheckText("ini 第2页注释", loaded.Comment[99], "注2");
+            CheckText("ini 第2页顺序", loaded.Order[99], "4");
+            CheckText("ini 第3页数据", loaded.Data[198], "第三页");
+            CheckText("ini 第3页延时", loaded.Delay[198], "2500");
+            CheckText("ini 含第2页键", t1.Contains("\r\nN201=H,第二页\r\n") && t1.Contains("\r\nN301=4,注2,1000\r\n") ? "yes" : "no", "yes");
+            CheckText("ini 含第3页键", t1.Contains("\r\nN401=A,第三页\r\n") && t1.Contains("\r\nN501=0,1,2500\r\n") ? "yes" : "no", "yes");
+            var legacy = IniDocument.Load("N1=A,hello\r\nN101=2,cmt,1500\r\n");
+            CheckText("旧ini第1页仍在", legacy.Data[0], "hello");
+            CheckText("旧ini第2页仍是空", legacy.Data[99], "");
+            CheckText("ini 还原字体", $"{loaded.FontName},{loaded.FontSize},{loaded.FontStyle},{loaded.FontColor}",
+                "Consolas,16,5," + Color.FromArgb(255, 20, 30, 40).ToArgb().ToString());
             CheckText("ini 网络模式", loaded.PortValue, "3");
             CheckText("ini 自定义波特率", loaded.Baud, "250000");
             CheckText("ini 帧尾档", loaded.TailReserve.ToString(), "3");
@@ -527,6 +559,112 @@ internal static class SelfTest
             form.Size = new Size(1200, 980);
             Application.DoEvents();
             CheckText("拉高窗口发送框不跟着长", send is not null && Math.Abs(send.Height - sendAt720) <= 4 ? "yes" : "no", "yes");
+
+            string? fontMenu = null;
+            string? backMenu = null;
+            if (form.MainMenuStrip is not null)
+            {
+                foreach (ToolStripItem top in form.MainMenuStrip.Items)
+                {
+                    if (top is not ToolStripMenuItem display || display.Text != "显示") continue;
+                    foreach (ToolStripItem sub in display.DropDownItems)
+                    {
+                        if (sub is not ToolStripMenuItem item) continue;
+                        if (item.Text.StartsWith("字体")) fontMenu = item.Text;
+                        if (item.Text == "背景颜色") backMenu = item.Text;
+                    }
+                }
+            }
+            CheckText("显示菜单有字体设置", fontMenu ?? "", "字体/颜色/大小/...");
+            CheckText("背景颜色仍在", backMenu ?? "", "背景颜色");
+
+            if (recv is not null)
+            {
+                using var face = new Font(form.Font.FontFamily, 16F, FontStyle.Bold | FontStyle.Italic);
+                form.ApplyRecvFont(face, Color.FromArgb(255, 10, 20, 30));
+                CheckText("接收框字号", recv.Font.Size.ToString(System.Globalization.CultureInfo.InvariantCulture), "16");
+                CheckText("接收框字体名", recv.Font.Name, form.Font.Name);
+                CheckText("接收框字形", ((int)recv.Font.Style).ToString(), ((int)(FontStyle.Bold | FontStyle.Italic)).ToString());
+                CheckText("接收框文字颜色", recv.ForeColor.ToArgb().ToString(), Color.FromArgb(255, 10, 20, 30).ToArgb().ToString());
+                CheckText("窗体字体未改", form.Font.Size.ToString(System.Globalization.CultureInfo.InvariantCulture), "9");
+                using var again = new Font(form.Font.FontFamily, 16F, FontStyle.Bold | FontStyle.Italic);
+                form.ApplyRecvFont(again, Color.FromArgb(255, 10, 20, 30));
+                int height;
+                try { height = recv.Font.Height; }
+                catch (ArgumentException) { height = -1; }
+                CheckText("同样字体再设一次仍然有效", height > 0 ? "yes" : "no", "yes");
+                CheckText("同样字体再设一次字号仍在", recv.Font.Size.ToString(System.Globalization.CultureInfo.InvariantCulture), "16");
+            }
+
+            form.Width = 820;
+            Application.DoEvents();
+            foreach (var c in AllControls(form))
+                if (c is Button expand && expand.Text == "扩展")
+                    expand.PerformClick();
+            Application.DoEvents();
+            foreach (var c in AllControls(form))
+            {
+                if (c is not SplitContainer sc || sc.Panel2Collapsed) continue;
+                int total = sc.ClientSize.Width;
+                int p2 = sc.Panel2.Width;
+                CheckText("扩展面板窄于一半", p2 * 2 < total ? "yes" : $"{p2}/{total}", "yes");
+                int quarter = Math.Max(total / 4, 460);
+                CheckText("扩展面板大约四分之一", p2 <= quarter ? "yes" : $"{p2}/{total}", "yes");
+            }
+            Control? grid = null;
+            foreach (var c in AllControls(form))
+                if (c is Label header && header.Text == "延时ms" && header.Parent is not null)
+                    grid = header.Parent;
+            if (grid is null)
+            {
+                CheckText("找到多条表", "no", "yes");
+            }
+            else
+            {
+                var cells = new List<Control>();
+                foreach (Control c in grid.Controls)
+                    if (c.Tag is Point && c.Width > 0 && c.Height > 0) cells.Add(c);
+                int overlaps = 0;
+                string sample = "";
+                for (int i = 0; i < cells.Count && overlaps == 0; i++)
+                {
+                    Rectangle a = cells[i].Bounds;
+                    a.Inflate(-1, -1);
+                    for (int j = i + 1; j < cells.Count; j++)
+                    {
+                        Rectangle b = cells[j].Bounds;
+                        b.Inflate(-1, -1);
+                        if (a.IntersectsWith(b))
+                        {
+                            overlaps++;
+                            sample = cells[i].Text + " | " + cells[j].Text;
+                            break;
+                        }
+                    }
+                }
+                CheckText("多条栏目互不遮挡", overlaps == 0 ? "yes" : sample, "yes");
+                bool headerInside = true;
+                foreach (Control c in cells)
+                {
+                    if (c is not Label || c.Tag is not Point cell) continue;
+                    if (c.Bottom > (cell.X + 1) * (grid.Height / 100) + 1) headerInside = false;
+                }
+                CheckText("表头落在自己的行里", headerInside ? "yes" : "no", "yes");
+                int shortSend = 0;
+                foreach (Control c in cells)
+                    if (c is Button b && b.Tag is Point p && p.Y == 2 && b.Height < b.Font.Height + 8)
+                        shortSend++;
+                CheckText("点击发送按钮容得下字", shortSend == 0 ? "yes" : shortSend.ToString(), "yes");
+                int pages = 0;
+                int dataBoxes = 0;
+                foreach (var c in AllControls(form))
+                {
+                    if (c is TabPage tp && tp.Text.StartsWith("第")) pages++;
+                    if (c is TextBox tb && tb.Tag is Point cell && cell.Y == 1) dataBoxes++;
+                }
+                CheckText("多条三页", pages.ToString(), "3");
+                CheckText("三页共297条", dataBoxes.ToString(), "297");
+            }
             form.Close();
             if (!hadIni && File.Exists(ini)) File.Delete(ini);
         }

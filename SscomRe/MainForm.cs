@@ -85,15 +85,15 @@ public sealed class MainForm : Form
     private volatile bool _abortFlag;                    // 0x4ED579
     private bool _sendingFile;
 
-    // —— M5：多条字符串 99 行 ——
-    private CheckBox[] _rowHex = new CheckBox[99];
-    private TextBox[] _rowData = new TextBox[99];
-    private Button[] _rowSend = new Button[99];
-    private TextBox[] _rowOrder = new TextBox[99];
-    private TextBox[] _rowTime = new TextBox[99];
-    private readonly string[] _rowComments = new string[99];
+    // —— M5：多条字符串，3 页 × 99 行 ——
+    private readonly CheckBox[] _rowHex = new CheckBox[IniDocument.MultiRowCount];
+    private readonly TextBox[] _rowData = new TextBox[IniDocument.MultiRowCount];
+    private readonly Button[] _rowSend = new Button[IniDocument.MultiRowCount];
+    private readonly TextBox[] _rowOrder = new TextBox[IniDocument.MultiRowCount];
+    private readonly TextBox[] _rowTime = new TextBox[IniDocument.MultiRowCount];
+    private readonly string[] _rowComments = new string[IniDocument.MultiRowCount];
     private readonly ToolTip _rowTip = new();
-    private MultiRowsPanel _multiRows = null!;
+    private readonly MultiRowsPanel[] _multiGrids = new MultiRowsPanel[IniDocument.MultiPageCount];
     private Control _toolBar = null!;
     private bool _relayoutScheduled;
     private bool _updatingMin;
@@ -131,7 +131,9 @@ public sealed class MainForm : Form
     // —— M8：ini。加载过程中不自动保存，也不要因为切模式而立刻连网。
     private Button _importIniButton = null!;
     private bool _loading;
-    private int _multiPanelWidth = 515;                  // N1086，缺省 515
+    private int _multiPanelWidth;                       // N1086。0 表示还没拖过，按窗口大约四分之一
+    private bool _multiWidthCustom;
+    private bool _userMovingSplitter;
     private TableLayoutPanel _bottomGrid = null!;
     private TableLayoutPanel _rootLayout = null!;
     private string _ascSendText = "abcdefg";
@@ -299,6 +301,7 @@ public sealed class MainForm : Form
         portCfg.DropDownItems.Add(_openImmediatelyItem);
 
         var display = new ToolStripMenuItem("显示");
+        display.DropDownItems.Add(new ToolStripMenuItem("字体/颜色/大小/...", null, (_, _) => PickRecvFont()));
         display.DropDownItems.Add(new ToolStripMenuItem("背景颜色", null, (_, _) => PickRecvBackColor()));
         var limitMenu = new ToolStripMenuItem("显示缓冲上限");
         AddLimitItem(limitMenu, "200K", 200_000);
@@ -876,19 +879,27 @@ public sealed class MainForm : Form
         {
             if (!_split.Panel2Collapsed) ApplyMultiWidth();
         };
+        // 只有用户拖动分割线才记宽度。程序自己改宽度也会触发 SplitterMoved，不能当成用户的选择。
+        _split.SplitterMoving += (_, _) =>
+        {
+            if (!_adjustingSplit) _userMovingSplitter = true;
+        };
         _split.SplitterMoved += (_, _) =>
         {
-            if (!_split.Panel2Collapsed && !_adjustingSplit) _multiPanelWidth = _split.Panel2.Width;
+            if (!_userMovingSplitter || _adjustingSplit || _split.Panel2Collapsed) return;
+            _userMovingSplitter = false;
+            _multiWidthCustom = true;
+            _multiPanelWidth = _split.Panel2.Width;
         };
         return _split;
     }
 
-    /// <summary>多条字符串面板（规格「多条字符串」）：顶部循环发送开关 + 99 行列区（HEX/数据/点击发送/顺序/延时）。</summary>
+    /// <summary>多条字符串面板：顶部循环发送开关 + 3 页，每页 99 行（HEX/数据/点击发送/顺序/延时）。</summary>
     private Control BuildMultiPanel()
     {
         _multiPanel = new Panel { Dock = DockStyle.Fill, BackColor = SystemColors.Control, Width = Math.Max(400, _multiPanelWidth) };
 
-        // 顶部条：循环发送、调宽按钮、（导入ini 待 M8）
+        // 顶部条：循环发送、调宽按钮、导入 ini。三页共用。
         var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(2), WrapContents = false };
         _loopSendBox = new CheckBox { Text = "循环发送", AutoSize = true, Padding = new Padding(2, 5, 6, 0) };
         top.Controls.Add(_loopSendBox);
@@ -903,13 +914,39 @@ public sealed class MainForm : Form
         _importIniButton.Click += (_, _) => ImportIni();
         top.Controls.Add(_importIniButton);
 
-        // 行表格：0 行是表头，1..99 是数据行。自绘布局，一次定位全部控件，避免 TableLayoutPanel 逐行重排。
-        int rowHeight = Math.Max(24, LineHeight() - 2);
+        int contentH;
+        using (var probe = new TextBox { Font = Font })
+            contentH = probe.PreferredHeight;
+        int headerH = TextRenderer.MeasureText("字符串(双击注释)", Font).Height + 8;
+        int rowHeight = Math.Max(contentH, headerH) + 6;
         int hexCol = Math.Max(36, TextRenderer.MeasureText("HEX", Font).Width + 16);
-        int orderCol = Math.Max(48, TextRenderer.MeasureText("顺序", Font).Width + 12);
-        int delayCol = Math.Max(64, TextRenderer.MeasureText("延时ms", Font).Width + 12);
+        int orderCol = Math.Max(48, TextRenderer.MeasureText("顺序", Font).Width + 16);
+        int delayCol = Math.Max(64, Math.Max(
+            TextRenderer.MeasureText("延时ms", Font).Width,
+            TextRenderer.MeasureText("1000", Font).Width) + 18);
         int sendCol = Math.Max(_multiBtnWidth, TextRenderer.MeasureText("点击发送", Font).Width + 16);
-        _multiRows = new MultiRowsPanel
+
+        var tabs = new TabControl { Dock = DockStyle.Fill };
+        for (int page = 0; page < IniDocument.MultiPageCount; page++)
+        {
+            var grid = BuildMultiGrid(page, rowHeight, hexCol, orderCol, delayCol, sendCol);
+            _multiGrids[page] = grid;
+            var scroll = new BufferedPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = SystemColors.Window };
+            scroll.Controls.Add(grid);
+            var tab = new TabPage($"第{page + 1}页") { Padding = new Padding(0), UseVisualStyleBackColor = true };
+            tab.Controls.Add(scroll);
+            tabs.TabPages.Add(tab);
+        }
+
+        _multiPanel.Controls.Add(tabs);
+        _multiPanel.Controls.Add(top);
+        return _multiPanel;
+    }
+
+    /// <summary>一页 99 行。下标是页内行号加上 page×99，三页连成一张发送表。</summary>
+    private MultiRowsPanel BuildMultiGrid(int page, int rowHeight, int hexCol, int orderCol, int delayCol, int sendCol)
+    {
+        var grid = new MultiRowsPanel
         {
             Dock = DockStyle.Top,
             Height = rowHeight * 100,
@@ -918,14 +955,13 @@ public sealed class MainForm : Form
             SendColumnWidth = sendCol,
             OrderColumnWidth = orderCol,
             DelayColumnWidth = delayCol,
-            MinimumSize = new Size(hexCol + sendCol + orderCol + delayCol + 80, rowHeight * 100),
         };
-        _multiRows.SuspendLayout();
+        grid.SuspendLayout();
         void AddHeader(string text, int col)
         {
             var label = HeaderLabel(text);
             label.Tag = new Point(0, col);
-            _multiRows.Controls.Add(label);
+            grid.Controls.Add(label);
         }
         AddHeader("HEX", 0);
         AddHeader("字符串(双击注释)", 1);
@@ -933,15 +969,17 @@ public sealed class MainForm : Form
         AddHeader("顺序", 3);
         AddHeader("延时ms", 4);
 
-        for (int k = 0; k < 99; k++)
+        int origin = page * IniDocument.MultiRowsPerPage;
+        for (int k = 0; k < IniDocument.MultiRowsPerPage; k++)
         {
-            int row = k;                                   // 闭包捕获
-            var cb = new CheckBox { Checked = false, AutoSize = false, Width = 26, Height = 20, Tag = new Point(row + 1, 0) };
+            int row = origin + k;                          // 闭包捕获全局行号
+            int shown = k + 1;                             // 页内行号，每页都从 1 起
+            var cb = new CheckBox { Checked = false, AutoSize = false, Width = 26, Height = 20, Tag = new Point(k + 1, 0) };
             cb.MouseUp += (_, _) => AutoSave();            // 规格：行 HEX 复选框 MouseUp 自动保存
             _rowHex[row] = cb;
-            _multiRows.Controls.Add(cb);
+            grid.Controls.Add(cb);
 
-            var data = new TextBox { Tag = new Point(row + 1, 1) };
+            var data = new TextBox { Tag = new Point(k + 1, 1) };
             data.KeyPress += (_, e) =>
             {
                 if (e.KeyChar == (char)1) { data.SelectAll(); e.Handled = true; }   // Ctrl+A 全选
@@ -949,14 +987,19 @@ public sealed class MainForm : Form
             };
             data.DoubleClick += (_, _) => EditRowComment(row);
             _rowData[row] = data;
-            _multiRows.Controls.Add(data);
+            grid.Controls.Add(data);
 
-            var send = new Button { Text = (row + 1).ToString(), Tag = new Point(row + 1, 2) };
+            var send = new Button
+            {
+                Text = shown.ToString(),
+                Tag = new Point(k + 1, 2),
+                Padding = new Padding(2, 0, 2, 0),
+            };
             send.Click += (_, _) => SendRow(row);
             _rowSend[row] = send;
-            _multiRows.Controls.Add(send);
+            grid.Controls.Add(send);
 
-            var order = new TextBox { Text = "0", Tag = new Point(row + 1, 3) };
+            var order = new TextBox { Text = "0", Tag = new Point(k + 1, 3) };
             _rowTip.SetToolTip(order, "自动发送时按顺序号从小到大,0不发送");
             order.KeyUp += (_, _) =>
             {
@@ -969,9 +1012,9 @@ public sealed class MainForm : Form
                 AutoSave();
             };
             _rowOrder[row] = order;
-            _multiRows.Controls.Add(order);
+            grid.Controls.Add(order);
 
-            var time = new TextBox { Text = "1000", Tag = new Point(row + 1, 4) };
+            var time = new TextBox { Text = "1000", Tag = new Point(k + 1, 4) };
             time.KeyUp += (_, _) =>
             {
                 var (t, c) = InputNormalizer.NormalizeInt(time.Text, time.SelectionStart, 1000, 1, 99999);
@@ -983,26 +1026,23 @@ public sealed class MainForm : Form
                 AutoSave();
             };
             _rowTime[row] = time;
-            _multiRows.Controls.Add(time);
+            grid.Controls.Add(time);
 
-            _rowComments[row] = (row + 1).ToString();      // 注释默认行号（按钮面板与提示同源）
+            _rowComments[row] = shown.ToString();          // 注释默认行号（按钮面板与提示同源）
             _rowTip.SetToolTip(data, _rowComments[row]);
         }
 
-        var scroll = new BufferedPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = SystemColors.Window };
-        scroll.Controls.Add(_multiRows);
-        _multiRows.ResumeLayout(false);
-
-        _multiPanel.Controls.Add(scroll);
-        _multiPanel.Controls.Add(top);
-        return _multiPanel;
+        grid.ResumeLayout(false);
+        return grid;
     }
 
     private static Label HeaderLabel(string text) => new()
     {
         Text = text,
-        AutoSize = true,
-        Padding = new Padding(2, 3, 0, 3),
+        AutoSize = false,
+        AutoEllipsis = true,
+        TextAlign = ContentAlignment.MiddleLeft,
+        Padding = new Padding(2, 0, 2, 0),
     };
 
     /// <summary>滚动区双缓冲，减少多行面板展开/滚动时的闪烁。</summary>
@@ -1023,40 +1063,88 @@ public sealed class MainForm : Form
         public int OrderColumnWidth { get; set; } = 56;
         public int DelayColumnWidth { get; set; } = 72;
 
+        private int _layouting;
+
         public MultiRowsPanel() => DoubleBuffered = true;
 
         protected override void OnLayout(LayoutEventArgs levent)
         {
-            base.OnLayout(levent);
-            int width = ClientSize.Width;
-            int dataWidth = Math.Max(80, width - HexColumnWidth - SendColumnWidth - OrderColumnWidth - DelayColumnWidth);
-            int xData = HexColumnWidth;
-            int xSend = xData + dataWidth;
-            int xOrder = xSend + SendColumnWidth;
-            int xDelay = xOrder + OrderColumnWidth;
-
-            foreach (Control c in Controls)
+            if (_layouting > 0)
             {
-                if (c.Tag is not Point cell) continue;
-                int row = cell.X, col = cell.Y;
-                int x = col switch { 0 => 0, 1 => xData, 2 => xSend, 3 => xOrder, _ => xDelay };
-                int colWidth = col switch { 0 => HexColumnWidth, 1 => dataWidth, 2 => SendColumnWidth, 3 => OrderColumnWidth, _ => DelayColumnWidth };
-                int y = row * RowHeight;
-                if (c is Label)
+                base.OnLayout(levent);
+                return;
+            }
+            _layouting++;
+            try
+            {
+                // 文本框按首选高度。点击发送按钮还有立体边框，跟文本框一样高时字的上下会被边框切掉。
+                int textH = Font.Height + 6;
+                int headerH = Font.Height + 8;
+                foreach (Control c in Controls)
                 {
-                    c.Location = new Point(x + 2, y + Math.Max(0, (RowHeight - c.Height) / 2));
-                    continue;
+                    if (c is TextBox tb)
+                        textH = Math.Max(textH, tb.PreferredHeight);
+                    else if (c is Label)
+                        headerH = Math.Max(headerH, TextRenderer.MeasureText(c.Text, Font).Height + 8);
                 }
-                if (col == 0 && c is CheckBox)
+                int buttonH = Math.Max(textH, Font.Height + 10);
+                int rowHeight = Math.Max(Math.Max(textH, buttonH), headerH) + 6;
+                RowHeight = rowHeight;
+                int wanted = rowHeight * 100;
+                if (Height != wanted) Height = wanted;
+
+                int hexMin = TextRenderer.MeasureText("HEX", Font).Width + 16;
+                int orderMin = TextRenderer.MeasureText("顺序", Font).Width + 16;
+                int delayMin = Math.Max(
+                    TextRenderer.MeasureText("延时ms", Font).Width,
+                    TextRenderer.MeasureText("1000", Font).Width) + 18;
+                if (HexColumnWidth < hexMin) HexColumnWidth = hexMin;
+                if (OrderColumnWidth < orderMin) OrderColumnWidth = orderMin;
+                if (DelayColumnWidth < delayMin) DelayColumnWidth = delayMin;
+
+                base.OnLayout(levent);
+                int width = ClientSize.Width;
+                int dataWidth = Math.Max(24, width - HexColumnWidth - SendColumnWidth - OrderColumnWidth - DelayColumnWidth);
+                int xData = HexColumnWidth;
+                int xSend = xData + dataWidth;
+                int xOrder = xSend + SendColumnWidth;
+                int xDelay = xOrder + OrderColumnWidth;
+
+                foreach (Control c in Controls)
                 {
-                    int boxWidth = Math.Min(c.Width, Math.Max(1, colWidth - 2));
-                    c.SetBounds(x + (colWidth - boxWidth) / 2,
-                        y + Math.Max(0, (RowHeight - c.Height) / 2), boxWidth, c.Height);
-                    continue;
+                    if (c.Tag is not Point cell) continue;
+                    int row = cell.X, col = cell.Y;
+                    int x = col switch { 0 => 0, 1 => xData, 2 => xSend, 3 => xOrder, _ => xDelay };
+                    int colWidth = col switch { 0 => HexColumnWidth, 1 => dataWidth, 2 => SendColumnWidth, 3 => OrderColumnWidth, _ => DelayColumnWidth };
+                    int y = row * rowHeight;
+                    if (c is Label)
+                    {
+                        // 表头限制在本列里，不再按文字宽度伸到旁边的栏目上。
+                        c.SetBounds(x + 1, y, Math.Max(1, colWidth - 2), rowHeight);
+                        continue;
+                    }
+                    if (col == 0 && c is CheckBox)
+                    {
+                        int boxWidth = Math.Min(c.Width, Math.Max(1, colWidth - 2));
+                        int boxH = Math.Min(c.Height, rowHeight - 4);
+                        c.SetBounds(x + (colWidth - boxWidth) / 2,
+                            y + Math.Max(0, (rowHeight - boxH) / 2), boxWidth, boxH);
+                        continue;
+                    }
+                    int w = Math.Max(1, colWidth - 2);
+                    int h = c switch
+                    {
+                        TextBox box => box.PreferredHeight,
+                        Button => buttonH,
+                        _ => c.Height,
+                    };
+                    h = Math.Min(h, rowHeight - 4);
+                    c.SetBounds(x + 1, y + Math.Max(0, (rowHeight - h) / 2), w, h);
                 }
-                int w = Math.Max(1, colWidth - 2);
-                int h = c.Height;
-                c.SetBounds(x + 1, y + Math.Max(0, (RowHeight - h) / 2), w, h);
+            }
+            finally
+            {
+                _layouting--;
             }
         }
     }
@@ -1769,8 +1857,7 @@ public sealed class MainForm : Form
     private void AdjustMultiButtonWidth(int delta)
     {
         _multiBtnWidth = Fx.Clamp(_multiBtnWidth + delta, 20, 400);
-        _multiRows.SendColumnWidth = Fx.Clamp(_multiBtnWidth, 20, 400);   // 规格：全部 99 个行按钮宽度 ±10 后重排
-        _multiRows.PerformLayout();
+        ApplySendColumnWidth();
         AutoSave();
     }
 
@@ -1785,7 +1872,8 @@ public sealed class MainForm : Form
     /// <summary>双击数据框输入注释（标题=行号）；确定后写入提示与行按钮标题并自动保存。</summary>
     private void EditRowComment(int row)
     {
-        if (!InputComment((row + 1).ToString(), _rowComments[row], out string result)) return;
+        int shown = row % IniDocument.MultiRowsPerPage + 1;
+        if (!InputComment(shown.ToString(), _rowComments[row], out string result)) return;
         _rowComments[row] = result;
         _rowSend[row].Text = result;
         _rowTip.SetToolTip(_rowData[row], result);
@@ -1819,7 +1907,7 @@ public sealed class MainForm : Form
     }
 
     /// <summary>
-    /// 循环发送勾选处理（规格 CheckBox6Click）：先关单条定时器；读 99 行顺序号做稳定升序排序；
+    /// 循环发送勾选处理（规格 CheckBox6Click）：先关单条定时器；三页共 297 行按顺序号做稳定升序排序；
     /// 打开多条定时器（首拍等待用定时器原有间隔 1000）。
     /// </summary>
     private void OnLoopSendChanged()
@@ -1827,8 +1915,8 @@ public sealed class MainForm : Form
         if (_loopSendBox.Checked)
         {
             _sendStringTimer.Stop();                       // 规格：先把 SendStringTimer 关掉
-            var pairs = new List<(int Order, int Row)>(99);
-            for (int k = 0; k < 99; k++)
+            var pairs = new List<(int Order, int Row)>(IniDocument.MultiRowCount);
+            for (int k = 0; k < IniDocument.MultiRowCount; k++)
                 pairs.Add((ParseIntOr0(_rowOrder[k].Text), k));
             _loopOrder.Clear();
             _loopOrder.AddRange(pairs.OrderBy(t => t.Order));   // 冒泡“大于才交换”= 稳定升序
@@ -1843,14 +1931,14 @@ public sealed class MainForm : Form
 
     /// <summary>
     /// 多条发送一拍（规格 Send_N_StringTimerTimer）：状态机找行 → 先把该行延时写进定时器 → 再按该行 HEX 开关发送。
-    /// 连续跳过 99 次自动取消“循环发送”。
+    /// 连续跳过整张表自动取消“循环发送”。
     /// </summary>
     private void LoopSendTick()
     {
         if (!_loopSendBox.Checked) { _multiTimer.Stop(); return; }
         if (!ChannelCanSend()) return;                      // 串口未开或网络未就绪：本拍不动
 
-        var input = new List<(int Order, string Data, int Row)>(99);
+        var input = new List<(int Order, string Data, int Row)>(_loopOrder.Count);
         foreach (var (order, row) in _loopOrder)
             input.Add((order, _rowData[row].Text, row));    // 顺序号用快照，数据实时读
 
@@ -1868,7 +1956,7 @@ public sealed class MainForm : Form
 
                 SendPayload(_rowData[step.Row].Text, _rowHex[step.Row].Checked);   // 再发送该行
 
-                for (int k = 0; k < 99; k++) _rowSend[k].ForeColor = Color.Black;
+                for (int k = 0; k < _rowSend.Length; k++) _rowSend[k].ForeColor = Color.Black;
                 _rowSend[step.Row].ForeColor = Color.Red;   // 当前行按钮变红
                 return;
         }
@@ -2217,9 +2305,18 @@ public sealed class MainForm : Form
     {
         _prewarmTimer.Stop();
         _prewarmQueue.Clear();
-        // 规格：切换多条面板；标题在 显示态=隐藏 / 隐藏态=扩展 之间切换
-        _split.Panel2Collapsed = !_split.Panel2Collapsed;
-        _hideToggleButton.Text = _split.Panel2Collapsed ? "扩展" : "隐藏";
+        // 规格：切换多条面板；标题在 显示态=隐藏 / 隐藏态=扩展 之间切换。
+        // 展开瞬间的布局也会挪分割线，这段不能记成用户拖过的宽度。
+        _adjustingSplit = true;
+        try
+        {
+            _split.Panel2Collapsed = !_split.Panel2Collapsed;
+            _hideToggleButton.Text = _split.Panel2Collapsed ? "扩展" : "隐藏";
+        }
+        finally
+        {
+            _adjustingSplit = false;
+        }
         if (!_split.Panel2Collapsed) ApplyMultiWidth();
     }
 
@@ -2305,6 +2402,96 @@ public sealed class MainForm : Form
         string shown = clamped.Value.ToString();
         if (_customBaudBox.Text != shown)
             _customBaudBox.Text = shown;
+    }
+
+    /// <summary>
+    /// 显示菜单「字体/颜色/大小/...」（原 SpeedButton2Click）：把接收框当前字体和文字颜色放进字体对话框，
+    /// 确定后应用到接收框。名称、字号、颜色写入 N1088–N1090，粗体/斜体/下划线/删除线写入 N1091。
+    /// </summary>
+    private void PickRecvFont()
+    {
+        // 对话框会把传入的 Font 交给 GDI+ ToLogFont。传入控件正在用的那份，
+        // 一旦这份已经被释放，打开对话框就抛“参数无效”。这里先交给一份独立副本。
+        Font current = LivingRecvFont();
+        using var seed = new Font(current.Name, current.SizeInPoints, current.Style, GraphicsUnit.Point);
+        using var dlg = new FontDialog();
+        dlg.ShowEffects = true;
+        dlg.ShowColor = true;
+        dlg.Font = seed;
+        dlg.Color = Color.FromArgb(255, _recvBox.ForeColor.R, _recvBox.ForeColor.G, _recvBox.ForeColor.B);
+        try
+        {
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        }
+        catch (ArgumentException)
+        {
+            MessageBox.Show(this, "无法打开字体对话框。", "字体", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        ApplyRecvFont(dlg.Font, dlg.Color);
+        AutoSave();
+    }
+
+    /// <summary>
+    /// 接收框字体若已被释放（Height 会抛“参数无效”），按还读得到的名字和字号重做一份。
+    /// </summary>
+    private Font LivingRecvFont()
+    {
+        Font current = _recvBox.Font;
+        try
+        {
+            _ = current.Height;
+            return current;
+        }
+        catch (ArgumentException)
+        {
+            float points = current.SizeInPoints;
+            if (points < 1f || float.IsNaN(points) || float.IsInfinity(points)) points = 9f;
+            var healed = new Font(current.Name, points, current.Style, GraphicsUnit.Point);
+            _recvBox.Font = healed;
+            return healed;
+        }
+    }
+
+    /// <summary>
+    /// 把字体和文字颜色装到接收框。调用方的 Font 不会被收走。
+    /// 名称、字号、字形都没变时，TextBox 会拒绝换对象；这时不能释放原来那份，否则下次打开字体对话框会报“参数无效”。
+    /// </summary>
+    internal void ApplyRecvFont(Font source, Color color)
+    {
+        float points;
+        try
+        {
+            points = source.SizeInPoints;
+        }
+        catch (ArgumentException)
+        {
+            _recvBox.ForeColor = color;
+            return;
+        }
+        if (points < 1f || float.IsNaN(points) || float.IsInfinity(points)) points = 9f;
+
+        Font next;
+        try
+        {
+            next = new Font(source.Name, points, source.Style, GraphicsUnit.Point);
+        }
+        catch (ArgumentException)
+        {
+            _recvBox.ForeColor = color;
+            return;
+        }
+
+        Font previous = _recvBox.Font;
+        _recvBox.Font = next;
+        _recvBox.ForeColor = color;
+        if (!ReferenceEquals(_recvBox.Font, next))
+        {
+            next.Dispose();
+            return;
+        }
+        if (!ReferenceEquals(previous, _recvBox.Font) && !ReferenceEquals(previous, Font))
+            previous.Dispose();
     }
 
     private void PickRecvBackColor()
@@ -2478,12 +2665,13 @@ public sealed class MainForm : Form
             MultiButtonWidth = _multiBtnWidth,
             FontName = _recvBox.Font.Name,
             FontSize = _recvBox.Font.Size.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            FontStyle = (int)_recvBox.Font.Style,
             FontColor = _recvBox.ForeColor.ToArgb(),
             Language = "C",
         };
         if (_hexSendBox.Checked) snap.HexText = _sendBox.Text;
         else snap.AscText = _sendBox.Text;
-        for (int i = 0; i < 99; i++)
+        for (int i = 0; i < IniDocument.MultiRowCount; i++)
         {
             snap.Order[i] = _rowOrder[i].Text;
             snap.Comment[i] = _rowComments[i];
@@ -2499,11 +2687,12 @@ public sealed class MainForm : Form
         _loading = true;
         try
         {
-            for (int i = 0; i < 99; i++)
+            for (int i = 0; i < IniDocument.MultiRowCount; i++)
             {
                 _rowOrder[i].Text = snap.Order[i];
                 _rowComments[i] = snap.Comment[i];
-                _rowSend[i].Text = snap.Comment[i].Length > 0 ? snap.Comment[i] : (i + 1).ToString();
+                int shown = i % IniDocument.MultiRowsPerPage + 1;
+                _rowSend[i].Text = snap.Comment[i].Length > 0 ? snap.Comment[i] : shown.ToString();
                 _rowTip.SetToolTip(_rowData[i], snap.Comment[i]);
                 _rowTime[i].Text = snap.Delay[i];
                 _rowHex[i].Checked = snap.Hex[i];
@@ -2536,18 +2725,32 @@ public sealed class MainForm : Form
             _timestampBox.Checked = snap.Timestamp;
             _timeoutEdit.Text = snap.TimeoutMs;
             _recvBox.BackColor = Color.FromArgb(snap.MemoBackColor);
+            Color fontColor = SystemColors.WindowText;
             try
             {
-                _recvBox.ForeColor = Color.FromArgb(snap.FontColor);
-                if (snap.FontName.Length > 0 &&
-                    float.TryParse(snap.FontSize, System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out float size) &&
-                    size > 0)
-                    _recvBox.Font = new Font(snap.FontName, size);
+                fontColor = Color.FromArgb(snap.FontColor);
             }
             catch
             {
-                // 字体名在本机不存在时保持当前字体，键仍然按当前字体写回
+                // 颜色值非法时用系统文字色
+            }
+            _recvBox.ForeColor = fontColor;
+            if (snap.FontName.Length > 0 &&
+                float.TryParse(snap.FontSize, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float size) &&
+                size > 0)
+            {
+                const int styleMask = (int)(FontStyle.Bold | FontStyle.Italic | FontStyle.Underline | FontStyle.Strikeout);
+                var style = (FontStyle)(snap.FontStyle & styleMask);
+                try
+                {
+                    using var loaded = new Font(snap.FontName, size, style, GraphicsUnit.Point);
+                    ApplyRecvFont(loaded, fontColor);
+                }
+                catch
+                {
+                    // 字体名在本机不存在时保持当前字体，键仍然按当前字体写回
+                }
             }
 
             int limit = snap.DisplayLimit;
@@ -2575,7 +2778,11 @@ public sealed class MainForm : Form
             _customBaudBox.Text = customBaud.ToString();
             _customBaudBox.Visible = _baudCombo.SelectedIndex <= 0;
 
-            _multiPanelWidth = snap.MultiPanelWidth > 0 ? snap.MultiPanelWidth : 515;
+            // 515 左右是旧的固定宽度，展开时误记的超宽值也不当成用户的选择。
+            int savedWidth = snap.MultiPanelWidth;
+            bool legacyWidth = savedWidth is >= 480 and <= 580 || savedWidth <= 0;
+            _multiWidthCustom = !legacyWidth;
+            _multiPanelWidth = _multiWidthCustom ? savedWidth : 0;
             _multiBtnWidth = snap.MultiButtonWidth > 0 ? snap.MultiButtonWidth : 120;
             ApplyLoadedPort(snap.PortValue);
             ApplyWindowGeometry(snap);
@@ -2632,17 +2839,43 @@ public sealed class MainForm : Form
         Top = bounds.Top + g.Top;
     }
 
+    private void ApplySendColumnWidth()
+    {
+        int width = Fx.Clamp(_multiBtnWidth, 20, 400);
+        foreach (MultiRowsPanel grid in _multiGrids)
+        {
+            if (grid is null) continue;
+            grid.SendColumnWidth = width;
+            grid.PerformLayout();
+        }
+    }
+
     private void ApplyMultiWidth()
     {
         if (_adjustingSplit) return;
         _adjustingSplit = true;
         try
         {
-            _multiRows.SendColumnWidth = Fx.Clamp(_multiBtnWidth, 20, 400);
-            _multiRows.PerformLayout();
+            ApplySendColumnWidth();
             int total = _split.ClientSize.Width;
             if (total < 300) return;
-            int want2 = Fx.Clamp(_multiPanelWidth, 120, total - 180);
+            try
+            {
+                if (_split.Panel2MinSize > 80) _split.Panel2MinSize = 80;
+            }
+            catch
+            {
+                // 窗口还太窄时设不了最小宽度，下一轮再试
+            }
+            // 没拖过：大约四分之一。拖过：用记下的像素。比窗口一半还宽的是展开时误记的，不当数。
+            int want2 = _multiWidthCustom ? _multiPanelWidth : Math.Max(160, total / 4);
+            if (want2 > total / 2)
+            {
+                _multiWidthCustom = false;
+                want2 = Math.Max(160, total / 4);
+            }
+            if (!_multiWidthCustom) _multiPanelWidth = want2;
+            want2 = Fx.Clamp(want2, 80, Math.Max(80, total - 160));
             int dist = total - _split.SplitterWidth - want2;
             int min = _split.Panel1MinSize;
             int max = total - _split.SplitterWidth - _split.Panel2MinSize;
