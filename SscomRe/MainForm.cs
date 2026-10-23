@@ -94,6 +94,9 @@ public sealed class MainForm : Form
     private readonly ToolTip _rowTip = new();
     private MultiRowsPanel _multiRows = null!;
     private Control _toolBar = null!;
+    private Control _timerValueGroup = null!;
+    private Control _timeoutGroup = null!;
+    private Control _verifyIndexGroup = null!;
     private bool _relayoutScheduled;
     private bool _updatingMin;
     private CheckBox _loopSendBox = null!;               // CheckBox6 循环发送
@@ -153,6 +156,7 @@ public sealed class MainForm : Form
         LoadConfig();
         UpdateLeftColumnWidth();
         UpdateStatus();
+        UpdateDependentVisibility();
     }
 
     // ———————————————————————— UI 构建 ————————————————————————
@@ -205,7 +209,7 @@ public sealed class MainForm : Form
     private int LineHeight() => Math.Max(28, Font.Height + 14);
 
     /// <summary>底部控制区：左侧三行端口，右侧两行选项加三行发送框。设置行换行时整体高度会增加。</summary>
-    private int BottomBandHeight() => LineHeight() * 5 + 4;
+    private int BottomBandHeight() => LineHeight() * 4 + 4;
 
     private void UpdateToolbarRowHeight(Control toolBar)
     {
@@ -225,7 +229,7 @@ public sealed class MainForm : Form
             _relayoutScheduled = false;
             if (_rootLayout is null || _toolBar is null || _settingsBar is null) return;
             int toolbarHeight = Math.Max(LineHeight(), _toolBar.Height);
-            int bottomHeight = Math.Max(LineHeight() * 2, _settingsBar.Height) + LineHeight() * 3 + 4;
+            int bottomHeight = Math.Max(LineHeight() * 2, _settingsBar.Height) + LineHeight() * 2 + 4;
             RowStyle toolbarRow = _rootLayout.RowStyles[2];
             if (Math.Abs(toolbarRow.Height - toolbarHeight) > 0.5f) toolbarRow.Height = toolbarHeight;
             RowStyle bottomRow = _rootLayout.RowStyles[3];
@@ -243,7 +247,7 @@ public sealed class MainForm : Form
         {
             int required = (MainMenuStrip?.Height ?? 0)
                            + _toolBar.Height
-                           + _settingsBar.Height + LineHeight() * 3 + 4
+                           + _settingsBar.Height + LineHeight() * 2 + 4
                            + (_statusStrip?.Height ?? 0)
                            + 130;
             int nonClient = Height - ClientSize.Height;
@@ -260,11 +264,27 @@ public sealed class MainForm : Form
         }
     }
 
+    /// <summary>定时/时间戳/校验的附属输入只在对应开关打开时显示，默认保持下栏紧凑。</summary>
+    private void UpdateDependentVisibility()
+    {
+        if (_timerValueGroup is null) return;
+        bool verifying = _verifyBox.SelectedIndex > 0;
+        SetVisible(_timerValueGroup, _timerSendBox.Checked);
+        SetVisible(_timeoutGroup, _timestampBox.Checked);
+        SetVisible(_verifyIndexGroup, verifying);
+        SetVisible(_crcBox, verifying);
+    }
+
+    private static void SetVisible(Control control, bool visible)
+    {
+        if (control.Visible != visible) control.Visible = visible;
+    }
+
     private void UpdateBottomBandHeight()
     {
         if (_rootLayout is null || _settingsBar is null) return;
         int settingsHeight = Math.Max(LineHeight() * 2, _settingsBar.Height);
-        int lowerHeight = LineHeight() * 3 + 4;
+        int lowerHeight = LineHeight() * 2 + 4;
         int h = settingsHeight + lowerHeight;
         RowStyle style = _rootLayout.RowStyles[3];
         if (Math.Abs(style.Height - h) > 0.5f) style.Height = h;
@@ -401,6 +421,7 @@ public sealed class MainForm : Form
             Margin = new Padding(0),
         };
         _lowerBand = lower;
+        lower.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         lower.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 248));
         lower.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
@@ -459,19 +480,18 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 2,
             Margin = new Padding(0),
         };
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 34));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 33));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 33));
+        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
 
-        _portCombo = new ComboBox { Width = unit * 14, DropDownStyle = ComboBoxStyle.DropDown };
+        _portCombo = new ComboBox { Width = unit * 10, DropDownStyle = ComboBoxStyle.DropDown };
         _openButton = new Button { Text = "打开串口", AutoSize = true };
-        _baudCombo = new ComboBox { Width = unit * 10, DropDownStyle = ComboBoxStyle.DropDownList };
+        _baudCombo = new ComboBox { Width = unit * 7, DropDownStyle = ComboBoxStyle.DropDownList };
         foreach (var b in ComPortService.BaudItems) _baudCombo.Items.Add(b);
         _baudCombo.SelectedIndex = 13; // 115200
-        _customBaudBox = new TextBox { Width = unit * 8, Text = _port.CustomBaud.ToString(), Visible = false };
+        _customBaudBox = new TextBox { Width = unit * 6, Text = _port.CustomBaud.ToString(), Visible = false };
         _customBaudBox.VisibleChanged += (_, _) => UpdateLeftColumnWidth();
         _rtsBox = new CheckBox { Text = "RTS", AutoSize = true };
         _dtrBox = new CheckBox { Text = "DTR", AutoSize = true };
@@ -488,15 +508,13 @@ public sealed class MainForm : Form
         var row2 = MakeLine();
         Put(row2, _openButton);
         Put(row2, _moreSettingsButton);
-        var row3 = MakeLine();
-        Put(row3, _rtsBox);
-        Put(row3, _dtrBox);
-        Put(row3, new Label { Text = "波特率", AutoSize = true });
-        Put(row3, _baudCombo);
-        Put(row3, _customBaudBox);
+        Put(row2, _rtsBox);
+        Put(row2, _dtrBox);
+        Put(row2, new Label { Text = "波特率", AutoSize = true });
+        Put(row2, _baudCombo);
+        Put(row2, _customBaudBox);
         grid.Controls.Add(row1, 0, 0);
         grid.Controls.Add(row2, 0, 1);
-        grid.Controls.Add(row3, 0, 2);
         return grid;
     }
 
@@ -508,12 +526,11 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 2,
             Margin = new Padding(0),
         };
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 34));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 33));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 33));
+        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         Label Lb(string text) => new() { Text = text, AutoSize = true };
 
         _remoteIpBox = new TextBox { Width = unit * 12 };
@@ -535,12 +552,10 @@ public sealed class MainForm : Form
         Put(row2, _localIpCombo);
         Put(row2, Lb("端口"));
         Put(row2, _localPortBox);
-        var row3 = MakeLine();
-        Put(row3, _connectButton);
-        Put(row3, _disconnectButton);
+        Put(row2, _connectButton);
+        Put(row2, _disconnectButton);
         grid.Controls.Add(row1, 0, 0);
         grid.Controls.Add(row2, 0, 1);
-        grid.Controls.Add(row3, 0, 2);
         return grid;
     }
 
@@ -557,7 +572,7 @@ public sealed class MainForm : Form
 
         Put(panel, Make("清除窗口", ClearReceive));
         Put(panel, Make("打开文件", OpenFile));
-        _filePathBox = new TextBox { Width = TextUnit() * 28, ReadOnly = true, BackColor = SystemColors.Window };
+        _filePathBox = new TextBox { Width = TextUnit() * 12, ReadOnly = true, BackColor = SystemColors.Window };
         Put(panel, _filePathBox);
         _sendFileButton = Make("发送文件", SendFile);
         Put(panel, _sendFileButton);
@@ -596,8 +611,10 @@ public sealed class MainForm : Form
         _hexSendBox = Cb("HEX发送");
         Put(line1, _hexSendBox);
         _timerSendBox = Cb("定时发送:");
-        _timerIntervalEdit = new TextBox { Text = "1000", Width = unit * 6 };
-        Put(line1, Group(_timerSendBox, _timerIntervalEdit, Lb("ms/次")));
+        Put(line1, _timerSendBox);
+        _timerIntervalEdit = new TextBox { Text = "1000", Width = unit * 4 };
+        _timerValueGroup = Group(_timerIntervalEdit, Lb("ms/次"));
+        Put(line1, _timerValueGroup);
         _newLineBox = Cb("加回车换行");
         Put(line1, _newLineBox);
 
@@ -605,7 +622,8 @@ public sealed class MainForm : Form
         Put(line2, _timestampBox);
         _timeoutLabel = Lb("超时时间:");
         _timeoutEdit = new TextBox { Text = "20", Width = unit * 4 };
-        Put(line2, Group(_timeoutLabel, _timeoutEdit, Lb("ms")));
+        _timeoutGroup = Group(_timeoutLabel, _timeoutEdit, Lb("ms"));
+        Put(line2, _timeoutGroup);
         _verifyNumEdit = new TextBox { Text = "1", Width = unit * 3 };
         _tailCombo = new ComboBox { Width = unit * 14, DropDownWidth = unit * 42, DropDownStyle = ComboBoxStyle.DropDownList };
         _tailCombo.Items.AddRange(new object[]
@@ -617,7 +635,8 @@ public sealed class MainForm : Form
             "第-4 (最后4个字节是帧尾,校验插在帧尾前面)",
         });
         _tailCombo.SelectedIndex = 0;
-        Put(line2, Group(Lb("第"), _verifyNumEdit, Lb("字节至"), _tailCombo));
+        _verifyIndexGroup = Group(Lb("第"), _verifyNumEdit, Lb("字节至"), _tailCombo);
+        Put(line2, _verifyIndexGroup);
         _verifyBox = new ComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDownList };
         _verifyBox.Items.AddRange(new object[] { "None", "ModbusCRC16", "CCITT-CRC16", "CRC32", "0-ADD8", "ADD8", "XOR8", "ADD16" });
         _verifyBox.SelectedIndex = 0;
@@ -1039,6 +1058,10 @@ public sealed class MainForm : Form
             if (!_loading) UpdateStatus();
         };
         _hexSendBox.CheckedChanged += (_, _) => OnHexSendModeChanged();
+        _timerSendBox.CheckedChanged += (_, _) => UpdateDependentVisibility();
+        _timestampBox.CheckedChanged += (_, _) => UpdateDependentVisibility();
+        _verifyBox.SelectedIndexChanged += (_, _) => UpdateDependentVisibility();
+        _filePathBox.TextChanged += (_, _) => _rowTip.SetToolTip(_filePathBox, _filePathBox.Text);
         _sendBox.TextChanged += (_, _) => RememberSendText();
         _rtsBox.Click += (_, _) => ApplyModemLine(_rtsBox, v => _port.ApplyRts(v), "RTS");
         _dtrBox.Click += (_, _) => ApplyModemLine(_dtrBox, v => _port.ApplyDtr(v), "DTR");
@@ -1668,6 +1691,7 @@ public sealed class MainForm : Form
         _crcBox.BackColor = verifying ? Color.Yellow : Color.White;
 
         _timeoutLabel.Enabled = _timestampBox.Checked;           // 规格：超时标签随“加时间戳”
+        UpdateDependentVisibility();
         _sentStatus.Text = $"S:{Interlocked.Read(ref _sentCount)}";
         _recvStatus.Text = $"R:{Interlocked.Read(ref _recvCount)}";
     }
@@ -2158,7 +2182,7 @@ public sealed class MainForm : Form
         else
         {
             // 规格：网络模式面板 3 是整个全局串 0x4ED538（下拉文本 + 本机 IP 文本）
-            _connStatus.Text = $"{_portCombo.Text}{_localIpCombo.Text}  {(_net.Ready ? "已连接" : "未连接")}";
+            _connStatus.Text = $"{_portCombo.Text} {_localIpCombo.Text}  {(_net.Ready ? "已连接" : "未连接")}";
         }
         _sentStatus.Text = $"S:{Interlocked.Read(ref _sentCount)}";
         _recvStatus.Text = $"R:{Interlocked.Read(ref _recvCount)}";

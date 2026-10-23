@@ -133,6 +133,9 @@ taskkill //IM SscomRe.exe //F
 - 左栏宽度不写死：`UpdateLeftColumnWidth()` 按当前可见内容实测；切模式/自定义波特率可见性变化/OnShown 后重算。
 - 根布局的工具栏行和底栏行是 Absolute，但高度由 `UpdateToolbarRowHeight`/`UpdateBottomBandHeight` 按实际折行高度更新；`ScheduleResponsiveRelayout()` 在缩放后延迟做一次终排，避免同一轮布局中行高彼此错过。
 - 窗口最小尺寸 820×560；`UpdateMinimumHeight()` 再按当前折行高度保证底栏和状态栏不被挤出窗口。
+- 下栏更紧凑：串口/网络栏各 2 行（打开/更多/RTS/DTR/波特率同排；网络本地+连接/断开同排），发送框 2 行。`_lowerBand` 的 TableLayoutPanel 必须有 `RowStyles.Add(new RowStyle(SizeType.Percent, 100))`，否则行会按子控件理想高度撑高、第二行被裁。
+- 设置区默认只保留开关：`_timerValueGroup`、`_timeoutGroup`、`_verifyIndexGroup`、`_crcBox` 只在定时发送/加时间戳/校验方式打开时显示，由 `UpdateDependentVisibility()` 控制；打开后会按需折行。
+- 文件路径框缩到 12u 并加完整路径 tooltip；端口/波特率/自定义波特率下拉分别 10u/7u/6u，给发送框留宽度。
 - 多条字符串 99 行不再用 TableLayoutPanel：`MultiRowsPanel` 自绘布局（固定行高/列宽，一次定位）。行按钮调宽只改 `SendColumnWidth` 后 `PerformLayout()`。
 - 首次展开前 `_prewarmTimer` 在 OnShown 后分批创建多面板句柄（每 20ms 8 个）；这样展开只做布局（实测 ~0.4s，改回 TableLayoutPanel 会回到秒级）。
 - 接收框 `WordWrap = true`、`ScrollBars.Vertical`；接收追加走 `_displayTimer`（30ms 合并一次）和 `AppendRecv()`：在底部时跟随，向上翻看历史时保持滚动/光标。
