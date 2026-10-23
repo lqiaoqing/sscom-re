@@ -562,27 +562,17 @@ public sealed class MainForm : Form
     private Control BuildToolBar()
     {
         var panel = MakeWrapLine();
-
-        Button Make(string text, Action? onClick = null)
-        {
-            var b = new Button { Text = text, AutoSize = true };
-            if (onClick != null) b.Click += (_, _) => onClick();
-            return b;
-        }
-
-        Put(panel, Make("清除窗口", ClearReceive));
-        Put(panel, Make("打开文件", OpenFile));
+        Put(panel, ActionButton("清除窗口", ClearReceive));
+        Put(panel, ActionButton("打开文件", OpenFile));
         _filePathBox = new TextBox { Width = TextUnit() * 12, ReadOnly = true, BackColor = SystemColors.Window };
         Put(panel, _filePathBox);
-        _sendFileButton = Make("发送文件", SendFile);
-        Put(panel, _sendFileButton);
-        Put(panel, Make("停止", StopSendFile));
-        Put(panel, Make("清发送区", () => _sendBox.Clear()));
+
+        panel.MarkRightGroup();
         _topmostBox = new CheckBox { Text = "最前", AutoSize = true };
         Put(panel, _topmostBox);
-        Put(panel, Make("保存参数", SaveConfig));
-        _hideToggleButton = Make("扩展", ToggleMultiPanel);
-        _collapseButton = Make("━", ToggleBottomPanels);
+        Put(panel, ActionButton("保存参数", SaveConfig));
+        _hideToggleButton = ActionButton("扩展", ToggleMultiPanel);
+        _collapseButton = ActionButton("━", ToggleBottomPanels);
         Put(panel, _hideToggleButton);
         Put(panel, _collapseButton);
         return panel;
@@ -590,40 +580,42 @@ public sealed class MainForm : Form
 
     private Control BuildSettingsBar()
     {
-        // 两行紧凑选项；窗口变窄时各行内部自动换行，面板高度由两行实际高度决定。
+        // 每行左侧接收、右侧发送，右侧组在行内右对齐；窄窗时自动折行。
         var host = new Panel { Dock = DockStyle.Top, Margin = new Padding(0), Width = 1200 };
-        var line1 = MakeWrapLine();
-        var line2 = MakeWrapLine();
+        var row1 = MakeWrapLine();
+        var row2 = MakeWrapLine();
 
         CheckBox Cb(string text, bool @checked = false) =>
             new() { Text = text, AutoSize = true, Checked = @checked };
         Label Lb(string text) => new() { Text = text, AutoSize = true };
+        Label Section(string text) => new() { Text = text, AutoSize = true, ForeColor = SystemColors.GrayText };
 
-        // 接收设置（保存数据/接收数据到文件/加时间戳按规格接上）
         int unit = TextUnit();
+        Put(row1, Section("接收"));
         _hexDisplayBox = Cb("HEX显示");
-        Put(line1, _hexDisplayBox);
-        var saveBtn = new Button { Text = "保存数据", AutoSize = true };
-        saveBtn.Click += (_, _) => SaveData();
-        Put(line1, saveBtn);
+        Put(row1, _hexDisplayBox);
+        Put(row1, ActionButton("保存数据", SaveData));
         _recvToFileBox = Cb("接收数据到文件");
-        Put(line1, _recvToFileBox);
+        Put(row1, _recvToFileBox);
+
+        row1.MarkRightGroup();
+        Put(row1, Section("发送"));
         _hexSendBox = Cb("HEX发送");
-        Put(line1, _hexSendBox);
+        Put(row1, _hexSendBox);
         _timerSendBox = Cb("定时发送:");
-        Put(line1, _timerSendBox);
+        Put(row1, _timerSendBox);
         _timerIntervalEdit = new TextBox { Text = "1000", Width = unit * 4 };
         _timerValueGroup = Group(_timerIntervalEdit, Lb("ms/次"));
-        Put(line1, _timerValueGroup);
+        Put(row1, _timerValueGroup);
         _newLineBox = Cb("加回车换行");
-        Put(line1, _newLineBox);
+        Put(row1, _newLineBox);
 
         _timestampBox = Cb("加时间戳和分包显示", @checked: true);
-        Put(line2, _timestampBox);
+        Put(row2, _timestampBox);
         _timeoutLabel = Lb("超时时间:");
         _timeoutEdit = new TextBox { Text = "20", Width = unit * 4 };
         _timeoutGroup = Group(_timeoutLabel, _timeoutEdit, Lb("ms"));
-        Put(line2, _timeoutGroup);
+        Put(row2, _timeoutGroup);
         _verifyNumEdit = new TextBox { Text = "1", Width = unit * 3 };
         _tailCombo = new ComboBox { Width = unit * 14, DropDownWidth = unit * 42, DropDownStyle = ComboBoxStyle.DropDownList };
         _tailCombo.Items.AddRange(new object[]
@@ -636,22 +628,28 @@ public sealed class MainForm : Form
         });
         _tailCombo.SelectedIndex = 0;
         _verifyIndexGroup = Group(Lb("第"), _verifyNumEdit, Lb("字节至"), _tailCombo);
-        Put(line2, _verifyIndexGroup);
+        Put(row2, _verifyIndexGroup);
         _verifyBox = new ComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDownList };
         _verifyBox.Items.AddRange(new object[] { "None", "ModbusCRC16", "CCITT-CRC16", "CRC32", "0-ADD8", "ADD8", "XOR8", "ADD16" });
         _verifyBox.SelectedIndex = 0;
         _crcBox = new TextBox { Width = unit * 8, ReadOnly = true, TabStop = false };
-        Put(line2, Group(Lb("加校验"), _verifyBox, _crcBox));
+        Put(row2, Group(Lb("加校验"), _verifyBox, _crcBox));
 
-        host.Controls.Add(line2);
-        host.Controls.Add(line1);
+        row2.MarkRightGroup();
+        _sendFileButton = ActionButton("发送文件", SendFile);
+        Put(row2, _sendFileButton);
+        Put(row2, ActionButton("停止", StopSendFile));
+        Put(row2, ActionButton("清发送区", () => _sendBox.Clear()));
+
+        host.Controls.Add(row2);
+        host.Controls.Add(row1);
         void SyncHeight()
         {
-            int h = Math.Max(LineHeight(), line1.Height) + Math.Max(LineHeight(), line2.Height);
+            int h = Math.Max(LineHeight(), row1.Height) + Math.Max(LineHeight(), row2.Height);
             if (host.Height != h) host.Height = h;
         }
-        line1.SizeChanged += (_, _) => SyncHeight();
-        line2.SizeChanged += (_, _) => SyncHeight();
+        row1.SizeChanged += (_, _) => SyncHeight();
+        row2.SizeChanged += (_, _) => SyncHeight();
         SyncHeight();
         return host;
     }
@@ -668,7 +666,7 @@ public sealed class MainForm : Form
     };
 
     /// <summary>可换行的一行：宽度不够时自动折到下一行，高度随内容增长。</summary>
-    private FlowLayoutPanel MakeWrapLine() => new WrapRowPanel
+    private WrapRowPanel MakeWrapLine() => new WrapRowPanel
     {
         Dock = DockStyle.Top,
         WrapContents = true,
@@ -702,6 +700,9 @@ public sealed class MainForm : Form
     private sealed class WrapRowPanel : FlowLayoutPanel
     {
         private bool _adjusting;
+        private int _rightStart = int.MaxValue;
+
+        public void MarkRightGroup() => _rightStart = Controls.Count;
 
         protected override void OnLayout(LayoutEventArgs levent)
         {
@@ -722,10 +723,47 @@ public sealed class MainForm : Form
                     if (Height != desired) Height = desired;
                 }
                 CenterLines();
+                AlignRightGroup();
             }
             finally
             {
                 _adjusting = false;
+            }
+        }
+
+        /// <summary>把标记之后的控件整体推到行右边缘；窄窗折到下一行时也右对齐。</summary>
+        private void AlignRightGroup()
+        {
+            if (_rightStart >= Controls.Count) return;
+            int width = ClientSize.Width;
+            if (width <= 0) return;
+            var rightSet = new HashSet<Control>();
+            for (int i = _rightStart; i < Controls.Count; i++) rightSet.Add(Controls[i]);
+
+            var rows = new List<List<Control>>();
+            List<Control>? current = null;
+            int prevLeft = int.MinValue;
+            foreach (Control c in Controls)
+            {
+                if (!c.Visible) continue;
+                if (current is null || c.Left <= prevLeft)
+                {
+                    current = new List<Control>();
+                    rows.Add(current);
+                }
+                current.Add(c);
+                prevLeft = c.Left;
+            }
+
+            int rightEdge = width - Padding.Right;
+            foreach (var row in rows)
+            {
+                var rights = row.Where(c => rightSet.Contains(c)).ToList();
+                if (rights.Count == 0) continue;
+                int maxRight = rights.Max(c => c.Right + c.Margin.Right);
+                int shift = rightEdge - maxRight;
+                if (shift <= 0) continue;
+                foreach (Control c in rights) c.Left += shift;
             }
         }
 
@@ -760,6 +798,13 @@ public sealed class MainForm : Form
                 start = end;
             }
         }
+    }
+
+    private static Button ActionButton(string text, Action? onClick = null)
+    {
+        var button = new Button { Text = text, AutoSize = true };
+        if (onClick != null) button.Click += (_, _) => onClick();
+        return button;
     }
 
     private static void Put(FlowLayoutPanel line, Control control)
@@ -1241,6 +1286,16 @@ public sealed class MainForm : Form
 
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, ref Point lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+    private const int EM_SETCUEBANNER = 0x1501;
+
+    private static void SetCueBanner(TextBox box, string text)
+    {
+        try { SendMessage(box.Handle, EM_SETCUEBANNER, (IntPtr)1, text); } catch { }
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct SCROLLINFO
@@ -1961,6 +2016,8 @@ public sealed class MainForm : Form
         // 构造期窗体不可见，Control.Visible 全为 false，左栏测宽要在显示后校正
         UpdateLeftColumnWidth();
         UpdateMinimumHeight();
+        SetCueBanner(_filePathBox, "未选择文件");
+        SetCueBanner(_sendBox, "在此输入要发送的数据");
         StartMultiHandlePrewarm();
         // 规格：勾了“启动时立即打开串口”，启动后自动打开（串口）/连接（网络）。加载 ini 在这之前。
         if (!_openImmediatelyItem.Checked) return;

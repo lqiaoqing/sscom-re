@@ -129,6 +129,8 @@ taskkill //IM SscomRe.exe //F
 
 - 不换行的底部行（端口/网络栏）用 `RowFlowPanel`：按行高垂直居中。
 - 工具栏和两行设置用 `WrapRowPanel`：宽度固定为父容器宽度，按 `GetPreferredSize(width)` 自动增高，宽度不足时自动折行；折行后按“视觉行”垂直居中。不要给需要换行的 FlowLayoutPanel 设 `AutoSize=true`（它会保持内容宽度而不折行，右侧被裁）。
+- 行内右侧组：添加左侧控件后调用 `WrapRowPanel.MarkRightGroup()`，再添加右侧控件；`AlignRightGroup()` 会把标记后的控件推到各自视觉行的右边缘（折行到下一行也右对齐）。工具栏右侧是最前/保存参数/扩展/━；设置第一行右侧是发送选项；第二行右侧是发送文件/停止/清发送区。
+- 设置区有“接收/发送”灰色分组标签；发送选项和发送操作紧挨发送框上方，工具栏只保留文件/清除相关按钮。
 - 设置项用 `Group(...)` 把“标签+输入+单位”绑成一组，折行时不拆散。
 - 左栏宽度不写死：`UpdateLeftColumnWidth()` 按当前可见内容实测；切模式/自定义波特率可见性变化/OnShown 后重算。
 - 根布局的工具栏行和底栏行是 Absolute，但高度由 `UpdateToolbarRowHeight`/`UpdateBottomBandHeight` 按实际折行高度更新；`ScheduleResponsiveRelayout()` 在缩放后延迟做一次终排，避免同一轮布局中行高彼此错过。
