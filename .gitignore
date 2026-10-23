@@ -28,3 +28,8 @@ Desktop.ini
 .DS_Store
 *.swp
 *~
+
+# Original SSCOM binaries and decompiled sources - do not publish
+sscom5.13.1.exe
+sscom5.13.1.unpacked.exe
+_analysis/decomp/
