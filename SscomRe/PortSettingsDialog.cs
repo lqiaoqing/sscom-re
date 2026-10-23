@@ -17,14 +17,16 @@ internal static class PortSettingsDialog
             MaximizeBox = false,
             ShowInTaskbar = false,
             ClientSize = new Size(360, 292),
-            Font = SystemFonts.MessageBoxFont,
+            Font = new Font("Microsoft YaHei UI", 9F),
+            BackColor = Theme.Canvas,
+            ForeColor = Theme.Text,
         };
 
         int y = 12;
         ComboBox AddCombo(string label, string[] items, int selected)
         {
-            form.Controls.Add(new Label { Text = label, AutoSize = true, Location = new Point(12, y + 4) });
-            var box = new ComboBox
+            form.Controls.Add(new Label { Text = label, AutoSize = true, Location = new Point(12, y + 4), ForeColor = Theme.Muted, BackColor = Color.Transparent });
+            var box = new ThemeComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Location = new Point(120, y),
@@ -45,8 +47,8 @@ internal static class PortSettingsDialog
 
         TextBox AddNumber(string label, int value)
         {
-            form.Controls.Add(new Label { Text = label, AutoSize = true, Location = new Point(12, y + 4) });
-            var box = new TextBox { Text = value.ToString(), Location = new Point(120, y), Width = 220 };
+            form.Controls.Add(new Label { Text = label, AutoSize = true, Location = new Point(12, y + 4), ForeColor = Theme.Muted, BackColor = Color.Transparent });
+            var box = new ThemeTextBox { Text = value.ToString(), Location = new Point(120, y), Width = 220 };
             form.Controls.Add(box);
             y += 28;
             return box;
@@ -61,14 +63,25 @@ internal static class PortSettingsDialog
             Text = "这些设置在下次打开串口时生效。",
             AutoSize = true,
             Location = new Point(12, y + 4),
+            ForeColor = Theme.Muted,
+            BackColor = Color.Transparent,
         });
 
-        var ok = new Button { Text = "确定", DialogResult = DialogResult.OK, Location = new Point(180, 256), Width = 75 };
-        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(264, 256), Width = 75 };
+        var ok = new ThemeButton
+        {
+            Text = "确定",
+            DialogResult = DialogResult.OK,
+            Location = new Point(180, 256),
+            Width = 75,
+            Kind = ThemeButton.ButtonKind.Primary,
+        };
+        var cancel = new ThemeButton { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(264, 256), Width = 75 };
         form.Controls.Add(ok);
         form.Controls.Add(cancel);
         form.AcceptButton = ok;
         form.CancelButton = cancel;
+        Theme.ApplyWindow(form);
+        Theme.StyleRecursive(form);
 
         if (form.ShowDialog(owner) != DialogResult.OK) return;
 

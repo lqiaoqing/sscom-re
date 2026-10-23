@@ -1,7 +1,7 @@
 # 交接文档：SscomRe（SSCOM 5.13.1 的 C# 重写）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前状态（2026-10-23）：**M1–M9 全部实现，`--selftest` 182/182 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前状态（2026-10-23）：**M1–M9 全部实现，UI Phase 1 深色主题已接入，`--selftest` 182/182 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -31,7 +31,12 @@ REWRITE-PLAN.md              里程碑 M1–M9 状态
 _analysis/                   逆向脚本与产物（见 §8，不含原程序）
 SscomRe/                     工程（.NET Framework 4.8 WinForms）
   Program.cs            入口；--selftest；全局异常→crash.log
-  MainForm.cs           主窗体（约 2900 行）：菜单、布局、收发编排、ini
+  MainForm.cs           主窗体（约 3000 行）：菜单、布局、收发编排、ini
+  Theme.cs              深色 token、DPI 尺寸、DWM、菜单/状态栏渲染、递归兜底
+  ThemeButton.cs        自绘按钮与按文字映射的矢量图标
+  ThemeCheckBox.cs      自绘复选框（琥珀勾选 + 暖色高亮）
+  ThemeComboBox.cs      自绘下拉框（覆盖原生浅色按钮、隐藏列表滚动条）
+  ThemeTextBox.cs       深色输入框、占位文字、暗色原生滚动条
   ComPortService.cs     串口层：COM 名归一化、波特率表、线路参数、DTR/RTS、ModemStatus
   NetworkService.cs     TCP 客户端/服务端/UDP + 就绪标志
   ReceiveDisplay.cs     接收显示管线（三累积、半汉字、时间戳、截断）
@@ -61,6 +66,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 | M7 终端仿真 + 更多串口设置 | ✅ 已建；按键顺序/退格/吞键/GBK 各有自检 |
 | M8 sscom51.ini 保存/导入 | ✅ 已建；含往返与旧格式兼容自检 |
 | M9 窗口几何/字体背景色/发布 | ✅ 已建；几何夹取/字体应用有自检 |
+| UI Phase 1 深色主题（换皮，不重排） | ✅ 已建；DWM 深色标题栏、自绘控件、暗色菜单/下拉/滚动条、自绘多条分页 |
 
 **验证口径：**
 
@@ -144,6 +150,20 @@ taskkill //IM SscomRe.exe //F
 - 接收框 `WordWrap = true`、`ScrollBars.Vertical`；追加走 `_displayTimer`（30ms 合并）；在底部时跟随，向上翻看历史时保持滚动/光标。
 - 高 DPI：物理像素布局 + 放大字体在 200% 缩放下会把底栏撑得很大，接收区变窄；自检已按 `DeviceDpi` 缩放测试窗口，但界面本身没有做完整的 DPI 自适应布局。改动布局时在 100% 和 200% 下都要看。
 
+### 5.6 深色主题 / 自绘控件（Phase 1）
+
+- 入口：`Theme.ApplyWindow(this)` + `Theme.StyleRecursive(this)` 在 `MainForm` 构造末尾调用；前者设窗口底色、DWM 深色标题栏/圆角、窗口图标，后者给遗漏的原生控件兜底。
+- **`ToolStrip.RenderMode` 必须在 `Renderer` 之前设置**：先设 Renderer 再设 RenderMode 会被系统默认渲染器覆盖（菜单勾选/白边问题就是这么来的）。菜单用 `ThemeMenuRenderer`，状态栏用 `ThemeStatusRenderer`。
+- 菜单勾选：原生勾选列在深色下是白底，已设 `ShowImageMargin=false`/`ShowCheckMargin=false`，用 `✓  ` 文本前缀表示勾选（`Theme.ApplyMenuCheckText`，监听 `CheckedChanged`）。菜单项 Text 会变，逻辑判断请用 `Tag`/`Checked`，不要用 Text 比对。
+- 下拉框：原生下拉按钮是浅色方块，`ThemeComboBox` 在 `WM_PAINT` 之后用 `GetComboBoxInfo` 的 `rcButton` 覆盖箭头和边框；`OnDropDown` 时隐藏列表原生滚动条并按项数设置高度。不要改回标准 ComboBox。
+- 按钮：`ThemeButton` 按 Text 映射矢量图标（清除/打开/发送文件/停止/清发送区/保存/扩展/更多设置/刷新/±/━）；高度用 `Font.Height + 12`，留出 FlowLayoutPanel 的 Margin，避免 200% DPI 被行裁切。
+- 复选框：`ThemeCheckBox` 勾选用琥珀色，`Highlighted` 控制暖色标签底；`StatusTick` 的 `Highlight` 只改这个属性，不要再设 `BackColor=Yellow`。
+- 文本框：`ThemeTextBox` 提供 `PlaceholderText`（路径框“未选择文件”），并在句柄创建时尝试 `SetWindowTheme(..., "DarkMode_Explorer")` 让原生滚动条变暗。
+- 多条字符串 3 页不再用 `TabControl`（原生页框在深色下始终有浅色边），改为 `pageHost` + `pageBar` 自绘分段按钮；`_multiPages`/`_multiTabs` 管理显隐。自检按“第1/2/3页”按钮计数，不按 `TabPage`。
+- 底栏两行设置区的高度额外 +4px（`UpdateBottomGridRows`/`BottomContentHeight`），给自绘下拉框留 Margin。
+- 接收框仍是普通 `TextBox`，日志是单色；要 RX/TX 分色需要换成 `RichTextBox` 并重做追加/截断/保存/滚动（Phase 2，不要偷偷改）。
+- 禁止在深色控件上再用 `SystemColors.Control/Window/WindowText` 或 `Color.White/Yellow`；所有颜色走 `Theme` token。
+
 ---
 
 ## 6. 已踩过的坑（别改回去）
@@ -162,6 +182,12 @@ taskkill //IM SscomRe.exe //F
 | 字体对话框传入已释放的 Font → “参数无效” | `LivingRecvFont` 修复；同字体重复设置不能释放控件正在用的对象 |
 | 自检直接跑在主窗体上，Close 会把测试字体/模式/窗口几何写进用户的 ini | 自检现在备份/恢复 ini；新增 UI 用例不要在恢复逻辑之外写文件 |
 | 布局测试写死 1200×720 → 200% DPI 下窗口过矮而误报 | 按 `DeviceDpi/96` 缩放测试窗口尺寸 |
+| 先设 `ToolStrip.Renderer` 再设 `RenderMode` → 自定义渲染器被系统默认覆盖 | 必须 `RenderMode` 先、`Renderer` 后 |
+| 深色菜单保留原生勾选列 → 左侧出现白色块，勾选框发蓝 | 关掉 Image/CheckMargin，用 `✓` 文本前缀表示勾选 |
+| 标准 ComboBox 的原生下拉按钮是白块，列表滚动条是浅色 | `ThemeComboBox` 在 WM_PAINT 后覆盖按钮；OnDropDown 隐藏列表滚动条 |
+| 原生 TabControl 的页框/标签条在深色下始终有浅色边 | 多条面板改用自绘分段按钮 + 页面 Panel，不再用 TabControl |
+| 自绘按钮和原生下拉框比行高多 2–4px → 200% DPI 下被行裁切 | 按钮高度用 `Font.Height+12`；底栏设置行额外 +4px |
+| `Theme.MonoFont` 返回共享 Font → `ApplyRecvFont` 释放旧字体时影响发送框 | 每次返回新 Font 实例，不共享 |
 
 ---
 
@@ -174,6 +200,9 @@ taskkill //IM SscomRe.exe //F
 - 校验模式 7（ADD16）的字节序按规格标为推断：低字节在前。
 - 打开文件预览用原字节直接按 Latin-1 式字符累积文本，再经 `ReceiveDisplay.SetPreviewBuffers` 替换预览缓冲；原始接收缓冲和接收计数不动。
 - 网络服务端本地端口非法时选择“提示后不启动”（规格此处原程序响应未细读）。
+- Phase 1 主题只换皮：接收日志仍是普通 `TextBox`（单色），RX/TX 分色等富文本效果留给 Phase 2；标题栏用 DWM 深色原生方案，完全自绘标题栏也留到 Phase 2。
+- 打开/保存文件、字体、颜色、MessageBox 是系统原生浅色对话框，未做深色包装。
+- 200% DPI + 窄屏（如 1440×900）下底栏会换行并超出窗口；设计窗口宽度约 2800 物理像素（或 100%–150% 缩放）时正常。
 
 ---
 
@@ -195,10 +224,13 @@ taskkill //IM SscomRe.exe //F
 
 按用户优先级从高到低：
 
-1. 在真实串口/网口上复验：打开/关闭、DTR/RTS、发送文件、定时发送、TCP 服务端多连接、UDP。
-2. 高 DPI 布局自适应（200% 缩放下底栏过高）；目前只保证 100%–150% 可用。
-3. 规格「还不能当规则用的部分」里的烧写器、波形等——**用户已排除，不要做**。
-4. 若需要单文件分发，可在 csproj 增加 Costura/ILMerge 方案；当前分发 exe + config 即可，目标机只需 .NET Framework 4.8。
+1. **UI Phase 2**：左侧连接/会话栏 + 主接收区 + 右侧多条发送抽屉的布局重排（视觉稿方向已确认）。
+2. 接收日志富文本化（`RichTextBox`，RX 青绿 / TX 琥珀），同时保持 30ms 合并刷新、截断重画、保存/打开文件行为。
+3. 完全自绘标题栏（保留拖动/吸附/最大化），或继续用原生 DWM 深色。
+4. 在真实串口/网口上复验：打开/关闭、DTR/RTS、发送文件、定时发送、TCP 服务端多连接、UDP。
+5. 高 DPI 布局自适应（200% 缩放下底栏过高）；目前只保证 100%–150% 或宽窗口可用。
+6. 规格「还不能当规则用的部分」里的烧写器、波形等——**用户已排除，不要做**。
+7. 若需要单文件分发，可在 csproj 增加 Costura/ILMerge 方案；当前分发 exe + config 即可，目标机只需 .NET Framework 4.8。
 
 ---
 

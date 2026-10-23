@@ -664,7 +664,7 @@ internal static class SelfTest
                 int dataBoxes = 0;
                 foreach (var c in AllControls(form))
                 {
-                    if (c is TabPage tp && tp.Text.StartsWith("第")) pages++;
+                    if (c is Button pageButton && pageButton.Text is "第1页" or "第2页" or "第3页") pages++;
                     if (c is TextBox tb && tb.Tag is Point cell && cell.Y == 1) dataBoxes++;
                 }
                 CheckText("多条三页", pages.ToString(), "3");

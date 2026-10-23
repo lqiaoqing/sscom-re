@@ -94,6 +94,8 @@ public sealed class MainForm : Form
     private readonly string[] _rowComments = new string[IniDocument.MultiRowCount];
     private readonly ToolTip _rowTip = new();
     private readonly MultiRowsPanel[] _multiGrids = new MultiRowsPanel[IniDocument.MultiPageCount];
+    private readonly Panel[] _multiPages = new Panel[IniDocument.MultiPageCount];
+    private readonly ThemeButton[] _multiTabs = new ThemeButton[IniDocument.MultiPageCount];
     private Control _toolBar = null!;
     private bool _relayoutScheduled;
     private bool _updatingMin;
@@ -156,6 +158,8 @@ public sealed class MainForm : Form
         LoadConfig();
         UpdateLeftColumnWidth();
         UpdateStatus();
+        Theme.ApplyWindow(this);
+        Theme.StyleRecursive(this);
     }
 
     // ———————————————————————— UI 构建 ————————————————————————
@@ -178,6 +182,7 @@ public sealed class MainForm : Form
             RowCount = 5,
             Margin = new Padding(0),
             Padding = new Padding(0),
+            BackColor = Theme.Canvas,
         };
         _rootLayout = root;
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -187,7 +192,7 @@ public sealed class MainForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, BottomBandHeight())); // 端口 + 选项 + 发送框
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // 状态栏
 
-        _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 8, Maximum = 100, Visible = false, Margin = new Padding(0) };
+        _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 8, Maximum = 100, Visible = false, Margin = new Padding(0), BackColor = Theme.Surface2 };
         root.Controls.Add(center, 0, 0);
         root.Controls.Add(_progressBar, 0, 1);
         root.Controls.Add(toolBar, 0, 2);
@@ -370,6 +375,7 @@ public sealed class MainForm : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Information)));
 
         menu.Items.AddRange(new ToolStripItem[] { comm, portCfg, display, send, multi, help });
+        Theme.StyleMenu(menu);
         return menu;
     }
 
@@ -389,13 +395,14 @@ public sealed class MainForm : Form
     /// <summary>底部一条：左边端口/网络，右边两行选项和发送框。高度固定，不换行拆字。</summary>
     private Control BuildBottomBand()
     {
-        var band = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0), Padding = new Padding(2, 0, 2, 0) };
+        var band = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0), Padding = new Padding(2, 0, 2, 0), BackColor = Theme.Canvas };
         var grid = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 4,
             Margin = new Padding(0),
+            BackColor = Theme.Canvas,
         };
         _bottomGrid = grid;
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
@@ -409,7 +416,7 @@ public sealed class MainForm : Form
         _netRows = BuildNetRows();
         for (int i = 0; i < 3; i++)
         {
-            var cell = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 6, 0) };
+            var cell = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 6, 0), BackColor = Theme.Canvas };
             _netRows[i].Visible = false;
             cell.Controls.Add(_serialRows[i]);
             cell.Controls.Add(_netRows[i]);
@@ -447,8 +454,9 @@ public sealed class MainForm : Form
     private void UpdateBottomGridRows()
     {
         if (_bottomGrid is null || _settingsRow1 is null || _settingsRow2 is null) return;
-        SetGridRowHeight(0, Math.Max(LineHeight(), _settingsRow1.Height));
-        SetGridRowHeight(1, Math.Max(LineHeight(), _settingsRow2.Height));
+        // 自绘下拉框比原生行高多出约 4px，行高留出上下 Margin，避免 200% DPI 下被裁掉。
+        SetGridRowHeight(0, Math.Max(LineHeight(), _settingsRow1.Height) + 4);
+        SetGridRowHeight(1, Math.Max(LineHeight(), _settingsRow2.Height) + 4);
         UpdateBottomBandHeight();
     }
 
@@ -459,8 +467,8 @@ public sealed class MainForm : Form
     }
 
     private int BottomContentHeight() =>
-        (_settingsRow1 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow1.Height))
-        + (_settingsRow2 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow2.Height))
+        (_settingsRow1 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow1.Height) + 4)
+        + (_settingsRow2 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow2.Height) + 4)
         + (LineHeight() + 2) * 2;
 
     private static int FlowContentWidth(FlowLayoutPanel row, bool onlyVisible = true)
@@ -485,16 +493,16 @@ public sealed class MainForm : Form
     private FlowLayoutPanel[] BuildSerialRows()
     {
         int unit = TextUnit();
-        _portCombo = new ComboBox { Width = unit * 10, DropDownStyle = ComboBoxStyle.DropDown };
-        _openButton = new Button { Text = "打开串口", AutoSize = true };
-        _baudCombo = new ComboBox { Width = unit * 7, DropDownStyle = ComboBoxStyle.DropDownList };
+        _portCombo = new ThemeComboBox { Width = unit * 10, DropDownStyle = ComboBoxStyle.DropDown };
+        _openButton = new ThemeButton { Text = "打开串口", AutoSize = true, Kind = ThemeButton.ButtonKind.Primary };
+        _baudCombo = new ThemeComboBox { Width = unit * 7, DropDownStyle = ComboBoxStyle.DropDownList };
         foreach (var b in ComPortService.BaudItems) _baudCombo.Items.Add(b);
         _baudCombo.SelectedIndex = 13; // 115200
-        _customBaudBox = new TextBox { Width = unit * 6, Text = _port.CustomBaud.ToString(), Visible = false };
+        _customBaudBox = new ThemeTextBox { Width = unit * 6, Text = _port.CustomBaud.ToString(), Visible = false };
         _customBaudBox.VisibleChanged += (_, _) => UpdateLeftColumnWidth();
-        _rtsBox = new CheckBox { Text = "RTS", AutoSize = true };
-        _dtrBox = new CheckBox { Text = "DTR", AutoSize = true };
-        _moreSettingsButton = new Button { Text = "更多串口设置", AutoSize = true };
+        _rtsBox = new ThemeCheckBox { Text = "RTS", AutoSize = true };
+        _dtrBox = new ThemeCheckBox { Text = "DTR", AutoSize = true };
+        _moreSettingsButton = new ThemeButton { Text = "更多串口设置", AutoSize = true };
         _moreSettingsButton.Click += (_, _) => ShowPortSettings();
 
         var row1 = MakeTopLine();
@@ -503,7 +511,7 @@ public sealed class MainForm : Form
 
         var row2 = MakeTopLine();
         Put(row2, _openButton);
-        var refresh = new Button { Text = "↻", AutoSize = true };
+        var refresh = new ThemeButton { Text = "↻", AutoSize = true };
         refresh.Click += (_, _) => RefreshPortList();
         _rowTip.SetToolTip(refresh, "刷新串口列表");
         Put(row2, refresh);
@@ -522,12 +530,12 @@ public sealed class MainForm : Form
     {
         int unit = TextUnit();
         Label Lb(string text) => new() { Text = text, AutoSize = true };
-        _remoteIpBox = new TextBox { Width = unit * 12 };
-        _remotePortBox = new TextBox { Width = unit * 6, Text = "8080" };
-        _localIpCombo = new ComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDown };
-        _localPortBox = new TextBox { Width = unit * 6, Text = "8080" };
-        _connectButton = new Button { Text = "连接", AutoSize = true };
-        _disconnectButton = new Button { Text = "断开", AutoSize = true };
+        _remoteIpBox = new ThemeTextBox { Width = unit * 12 };
+        _remotePortBox = new ThemeTextBox { Width = unit * 6, Text = "8080" };
+        _localIpCombo = new ThemeComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDown };
+        _localPortBox = new ThemeTextBox { Width = unit * 6, Text = "8080" };
+        _connectButton = new ThemeButton { Text = "连接", AutoSize = true, Kind = ThemeButton.ButtonKind.Primary };
+        _disconnectButton = new ThemeButton { Text = "断开", AutoSize = true };
         _connectButton.Click += (_, _) => ConnectNetwork();
         _disconnectButton.Click += (_, _) => DisconnectNetwork();
 
@@ -552,7 +560,14 @@ public sealed class MainForm : Form
         var panel = MakeWrapLine();
         Put(panel, ActionButton("清除窗口", ClearReceive));
         Put(panel, ActionButton("打开文件", OpenFile));
-        _filePathBox = new TextBox { Width = TextUnit() * 12, ReadOnly = true, BackColor = SystemColors.Window };
+        _filePathBox = new ThemeTextBox
+        {
+            Width = TextUnit() * 12,
+            ReadOnly = true,
+            BackColor = Theme.Field,
+            ForeColor = Theme.Muted,
+            PlaceholderText = "未选择文件",
+        };
         Put(panel, _filePathBox);
         panel.StretchControl = _filePathBox;
 
@@ -561,11 +576,12 @@ public sealed class MainForm : Form
         Put(panel, _sendFileButton);
         Put(panel, ActionButton("停止", StopSendFile));
         Put(panel, ActionButton("清发送区", () => _sendBox.Clear()));
-        _topmostBox = new CheckBox { Text = "最前", AutoSize = true };
+        _topmostBox = new ThemeCheckBox { Text = "最前", AutoSize = true };
         Put(panel, _topmostBox);
         Put(panel, ActionButton("保存参数", SaveConfig));
         _hideToggleButton = ActionButton("扩展", ToggleMultiPanel);
         _collapseButton = ActionButton("━", ToggleBottomPanels);
+        if (_collapseButton is ThemeButton collapse) collapse.Kind = ThemeButton.ButtonKind.Icon;
         Put(panel, _hideToggleButton);
         Put(panel, _collapseButton);
         return panel;
@@ -575,8 +591,8 @@ public sealed class MainForm : Form
     {
         var row = MakeWrapLine();
         CheckBox Cb(string text, bool @checked = false) =>
-            new() { Text = text, AutoSize = true, Checked = @checked };
-        Label Lb(string text) => new() { Text = text, AutoSize = true };
+            new ThemeCheckBox { Text = text, AutoSize = true, Checked = @checked };
+        Label Lb(string text) => new() { Text = text, AutoSize = true, ForeColor = Theme.Muted, BackColor = Color.Transparent };
         int unit = TextUnit();
 
         _hexDisplayBox = Cb("HEX显示");
@@ -586,7 +602,7 @@ public sealed class MainForm : Form
         Put(row, _recvToFileBox);
         _hexSendBox = Cb("HEX发送");
         _timerSendBox = Cb("定时发送:");
-        _timerIntervalEdit = new TextBox { Text = "1000", Width = unit * 4 };
+        _timerIntervalEdit = new ThemeTextBox { Text = "1000", Width = unit * 4 };
         _newLineBox = Cb("加回车换行");
         Put(row, MakeGroup(_hexSendBox, _timerSendBox, _timerIntervalEdit, Lb("ms/次"), _newLineBox));
         return row;
@@ -595,21 +611,21 @@ public sealed class MainForm : Form
     private WrapRowPanel BuildVerifyRow()
     {
         var row = MakeWrapLine();
-        Label Lb(string text) => new() { Text = text, AutoSize = true };
+        Label Lb(string text) => new() { Text = text, AutoSize = true, ForeColor = Theme.Muted, BackColor = Color.Transparent };
         int unit = TextUnit();
 
-        _timestampBox = new CheckBox { Text = "加时间戳和分包显示", AutoSize = true, Checked = true };
+        _timestampBox = new ThemeCheckBox { Text = "加时间戳和分包显示", AutoSize = true, Checked = true };
         Put(row, _timestampBox);
         _timeoutLabel = Lb("超时时间:");
         Put(row, _timeoutLabel);
-        _timeoutEdit = new TextBox { Text = "20", Width = unit * 4 };
+        _timeoutEdit = new ThemeTextBox { Text = "20", Width = unit * 4 };
         Put(row, _timeoutEdit);
         Put(row, Lb("ms"));
         Put(row, Lb("第"));
-        _verifyNumEdit = new TextBox { Text = "1", Width = unit * 3 };
+        _verifyNumEdit = new ThemeTextBox { Text = "1", Width = unit * 3 };
         Put(row, _verifyNumEdit);
         Put(row, Lb("字节至"));
-        _tailCombo = new ComboBox { Width = unit * 14, DropDownWidth = unit * 42, DropDownStyle = ComboBoxStyle.DropDownList };
+        _tailCombo = new ThemeComboBox { Width = unit * 14, DropDownWidth = unit * 42, DropDownStyle = ComboBoxStyle.DropDownList };
         _tailCombo.Items.AddRange(new object[]
         {
             "末尾 (无帧尾字节)",
@@ -621,11 +637,11 @@ public sealed class MainForm : Form
         _tailCombo.SelectedIndex = 0;
         Put(row, _tailCombo);
         Put(row, Lb("加校验"));
-        _verifyBox = new ComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDownList };
+        _verifyBox = new ThemeComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDownList };
         _verifyBox.Items.AddRange(new object[] { "None", "ModbusCRC16", "CCITT-CRC16", "CRC32", "0-ADD8", "ADD8", "XOR8", "ADD16" });
         _verifyBox.SelectedIndex = 0;
         Put(row, _verifyBox);
-        _crcBox = new TextBox { Width = unit * 8, ReadOnly = true, TabStop = false };
+        _crcBox = new ThemeTextBox { Width = unit * 8, ReadOnly = true, TabStop = false, ForeColor = Theme.Accent };
         Put(row, _crcBox);
         return row;
     }
@@ -639,6 +655,7 @@ public sealed class MainForm : Form
         FlowDirection = FlowDirection.LeftToRight,
         Margin = new Padding(0),
         Padding = new Padding(2, 1, 2, 0),
+        BackColor = Theme.Canvas,
     };
 
     /// <summary>可换行的一行：宽度不够时自动折到下一行，高度随内容增长。</summary>
@@ -650,6 +667,7 @@ public sealed class MainForm : Form
         FlowDirection = FlowDirection.LeftToRight,
         Margin = new Padding(0),
         Padding = new Padding(2, 1, 2, 0),
+        BackColor = Theme.Canvas,
     };
 
     private WrapRowPanel MakeWrapLine() => new WrapRowPanel
@@ -662,6 +680,7 @@ public sealed class MainForm : Form
         Margin = new Padding(0),
         Padding = new Padding(2, 1, 2, 1),
         Width = 1200,   // 构造期先按宽窗口排一次，避免在默认 200px 宽度下反复折行
+        BackColor = Theme.Canvas,
     };
 
     /// <summary>不换行行内的垂直居中（固定行高区域用）。</summary>
@@ -813,7 +832,12 @@ public sealed class MainForm : Form
 
     private static Button ActionButton(string text, Action? onClick = null)
     {
-        var button = new Button { Text = text, AutoSize = true };
+        var button = new ThemeButton
+        {
+            Text = text,
+            AutoSize = true,
+            Kind = text is "停止" ? ThemeButton.ButtonKind.Danger : ThemeButton.ButtonKind.Default,
+        };
         if (onClick != null) button.Click += (_, _) => onClick();
         return button;
     }
@@ -828,6 +852,7 @@ public sealed class MainForm : Form
             FlowDirection = FlowDirection.LeftToRight,
             Margin = new Padding(0),
             Padding = new Padding(0),
+            BackColor = Theme.Canvas,
         };
         foreach (Control control in controls)
         {
@@ -844,6 +869,11 @@ public sealed class MainForm : Form
         control.Margin = new Padding(3, 2, 2, 2);
         if (control is Label or CheckBox)
             control.AutoSize = true;
+        if (control is Label label)
+        {
+            label.ForeColor = Theme.Muted;
+            label.BackColor = Color.Transparent;
+        }
         if (control is Button button)
         {
             button.AutoSize = true;
@@ -856,7 +886,7 @@ public sealed class MainForm : Form
 
     private Control BuildCenter()
     {
-        _recvBox = new TextBox
+        _recvBox = new ThemeTextBox
         {
             Multiline = true,
             ReadOnly = false,
@@ -864,15 +894,23 @@ public sealed class MainForm : Form
             WordWrap = true,
             AcceptsReturn = true,
             Dock = DockStyle.Fill,
-            BackColor = SystemColors.Window,
+            BorderStyle = BorderStyle.None,
+            BackColor = Theme.Log,
+            ForeColor = Theme.Text,
+            Font = Theme.MonoFont(10F),
         };
 
         _split = new SplitContainer
         {
             Dock = DockStyle.Fill,
             Orientation = Orientation.Vertical,
+            BackColor = Theme.Border,
         };
-        _split.Panel1.Controls.Add(_recvBox);
+        _split.Panel1.BackColor = Theme.Log;
+        _split.Panel2.BackColor = Theme.Surface;
+        var recvHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(1), BackColor = Theme.Border };
+        recvHost.Controls.Add(_recvBox);
+        _split.Panel1.Controls.Add(recvHost);
         _split.Panel2.Controls.Add(BuildMultiPanel());
         _split.Panel2Collapsed = true;   // 规格：多条面板初始隐藏
         _split.Resize += (_, _) =>
@@ -897,25 +935,27 @@ public sealed class MainForm : Form
     /// <summary>多条字符串面板：顶部循环发送开关 + 3 页，每页 99 行（HEX/数据/点击发送/顺序/延时）。</summary>
     private Control BuildMultiPanel()
     {
-        _multiPanel = new Panel { Dock = DockStyle.Fill, BackColor = SystemColors.Control, Width = Math.Max(400, _multiPanelWidth) };
+        _multiPanel = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Width = Math.Max(400, _multiPanelWidth) };
 
         // 顶部条：循环发送、调宽按钮、导入 ini。三页共用。
-        var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(2), WrapContents = false };
-        _loopSendBox = new CheckBox { Text = "循环发送", AutoSize = true, Padding = new Padding(2, 5, 6, 0) };
+        int smallButton = Math.Max(26, Font.Height + 10);
+        int smallButtonH = Math.Max(22, Font.Height + 6);
+        var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(2), WrapContents = false, BackColor = Theme.Surface2 };
+        _loopSendBox = new ThemeCheckBox { Text = "循环发送", AutoSize = true, Padding = new Padding(2, 5, 6, 0) };
         top.Controls.Add(_loopSendBox);
-        var minus = new Button { Text = "−", Width = 26, Height = 22, Margin = new Padding(2, 1, 0, 0) };
+        var minus = new ThemeButton { Text = "−", Width = smallButton, Height = smallButtonH, Margin = new Padding(2, 1, 0, 0), Kind = ThemeButton.ButtonKind.Icon };
         minus.Click += (_, _) => AdjustMultiButtonWidth(-10);
-        var plus = new Button { Text = "＋", Width = 26, Height = 22, Margin = new Padding(2, 1, 0, 0) };
+        var plus = new ThemeButton { Text = "＋", Width = smallButton, Height = smallButtonH, Margin = new Padding(2, 1, 0, 0), Kind = ThemeButton.ButtonKind.Icon };
         plus.Click += (_, _) => AdjustMultiButtonWidth(+10);
-        top.Controls.Add(new Label { Text = "点击发送按钮宽度:", AutoSize = true, Padding = new Padding(6, 7, 0, 0) });
+        top.Controls.Add(new Label { Text = "点击发送按钮宽度:", AutoSize = true, Padding = new Padding(6, 7, 0, 0), ForeColor = Theme.Muted, BackColor = Color.Transparent });
         top.Controls.Add(minus);
         top.Controls.Add(plus);
-        _importIniButton = new Button { Text = "导入ini", Width = 64, Height = 22, Margin = new Padding(8, 1, 0, 0) };
+        _importIniButton = new ThemeButton { Text = "导入ini", AutoSize = true, Margin = new Padding(8, 1, 0, 0) };
         _importIniButton.Click += (_, _) => ImportIni();
         top.Controls.Add(_importIniButton);
 
         int contentH;
-        using (var probe = new TextBox { Font = Font })
+        using (var probe = new ThemeTextBox { Font = Font })
             contentH = probe.PreferredHeight;
         int headerH = TextRenderer.MeasureText("字符串(双击注释)", Font).Height + 8;
         int rowHeight = Math.Max(contentH, headerH) + 6;
@@ -926,19 +966,47 @@ public sealed class MainForm : Form
             TextRenderer.MeasureText("1000", Font).Width) + 18);
         int sendCol = Math.Max(_multiBtnWidth, TextRenderer.MeasureText("点击发送", Font).Width + 16);
 
-        var tabs = new TabControl { Dock = DockStyle.Fill };
+        var pageHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Canvas };
+        var pageBar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = LineHeight(),
+            WrapContents = false,
+            Padding = new Padding(0, 1, 0, 0),
+            BackColor = Theme.Surface2,
+        };
         for (int page = 0; page < IniDocument.MultiPageCount; page++)
         {
             var grid = BuildMultiGrid(page, rowHeight, hexCol, orderCol, delayCol, sendCol);
             _multiGrids[page] = grid;
-            var scroll = new BufferedPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = SystemColors.Window };
+            var scroll = new BufferedPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = Theme.Canvas,
+                Visible = page == 0,
+            };
             scroll.Controls.Add(grid);
-            var tab = new TabPage($"第{page + 1}页") { Padding = new Padding(0), UseVisualStyleBackColor = true };
-            tab.Controls.Add(scroll);
-            tabs.TabPages.Add(tab);
+            pageHost.Controls.Add(scroll);
+            _multiPages[page] = scroll;
+
+            var tab = new ThemeButton
+            {
+                Text = $"第{page + 1}页",
+                AutoSize = false,
+                Width = Math.Max(72, TextRenderer.MeasureText($"第{page + 1}页", Font).Width + Theme.Scale(this, 24)),
+                Height = Font.Height + 10,
+                Margin = new Padding(0, 0, 3, 0),
+                Kind = page == 0 ? ThemeButton.ButtonKind.Outline : ThemeButton.ButtonKind.Default,
+            };
+            int selected = page;
+            tab.Click += (_, _) => SelectMultiPage(selected);
+            pageBar.Controls.Add(tab);
+            _multiTabs[page] = tab;
         }
 
-        _multiPanel.Controls.Add(tabs);
+        _multiPanel.Controls.Add(pageHost);
+        _multiPanel.Controls.Add(pageBar);
         _multiPanel.Controls.Add(top);
         return _multiPanel;
     }
@@ -974,12 +1042,19 @@ public sealed class MainForm : Form
         {
             int row = origin + k;                          // 闭包捕获全局行号
             int shown = k + 1;                             // 页内行号，每页都从 1 起
-            var cb = new CheckBox { Checked = false, AutoSize = false, Width = 26, Height = 20, Tag = new Point(k + 1, 0) };
+            var cb = new ThemeCheckBox
+            {
+                Checked = false,
+                AutoSize = false,
+                Width = Math.Max(26, Font.Height + 10),
+                Height = Math.Max(20, Font.Height + 4),
+                Tag = new Point(k + 1, 0),
+            };
             cb.MouseUp += (_, _) => AutoSave();            // 规格：行 HEX 复选框 MouseUp 自动保存
             _rowHex[row] = cb;
             grid.Controls.Add(cb);
 
-            var data = new TextBox { Tag = new Point(k + 1, 1) };
+            var data = new ThemeTextBox { Tag = new Point(k + 1, 1) };
             data.KeyPress += (_, e) =>
             {
                 if (e.KeyChar == (char)1) { data.SelectAll(); e.Handled = true; }   // Ctrl+A 全选
@@ -989,7 +1064,7 @@ public sealed class MainForm : Form
             _rowData[row] = data;
             grid.Controls.Add(data);
 
-            var send = new Button
+            var send = new ThemeButton
             {
                 Text = shown.ToString(),
                 Tag = new Point(k + 1, 2),
@@ -999,7 +1074,7 @@ public sealed class MainForm : Form
             _rowSend[row] = send;
             grid.Controls.Add(send);
 
-            var order = new TextBox { Text = "0", Tag = new Point(k + 1, 3) };
+            var order = new ThemeTextBox { Text = "0", Tag = new Point(k + 1, 3) };
             _rowTip.SetToolTip(order, "自动发送时按顺序号从小到大,0不发送");
             order.KeyUp += (_, _) =>
             {
@@ -1014,7 +1089,7 @@ public sealed class MainForm : Form
             _rowOrder[row] = order;
             grid.Controls.Add(order);
 
-            var time = new TextBox { Text = "1000", Tag = new Point(k + 1, 4) };
+            var time = new ThemeTextBox { Text = "1000", Tag = new Point(k + 1, 4) };
             time.KeyUp += (_, _) =>
             {
                 var (t, c) = InputNormalizer.NormalizeInt(time.Text, time.SelectionStart, 1000, 1, 99999);
@@ -1043,12 +1118,20 @@ public sealed class MainForm : Form
         AutoEllipsis = true,
         TextAlign = ContentAlignment.MiddleLeft,
         Padding = new Padding(2, 0, 2, 0),
+        ForeColor = Theme.Muted,
+        BackColor = Theme.Surface2,
     };
 
     /// <summary>滚动区双缓冲，减少多行面板展开/滚动时的闪烁。</summary>
     private sealed class BufferedPanel : Panel
     {
         public BufferedPanel() => DoubleBuffered = true;
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Theme.TryDarkNative(Handle);
+        }
     }
 
     /// <summary>
@@ -1065,7 +1148,26 @@ public sealed class MainForm : Form
 
         private int _layouting;
 
-        public MultiRowsPanel() => DoubleBuffered = true;
+        public MultiRowsPanel()
+        {
+            DoubleBuffered = true;
+            BackColor = Theme.Surface;
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            using (var back = new SolidBrush(Theme.Surface))
+                e.Graphics.FillRectangle(back, ClientRectangle);
+            using (var header = new SolidBrush(Theme.Surface2))
+                e.Graphics.FillRectangle(header, 0, 0, Width, Math.Min(RowHeight, Height));
+            using var line = new Pen(Theme.WithAlpha(28, Theme.Border));
+            for (int row = 1; row <= 99; row++)
+            {
+                int y = row * RowHeight - 1;
+                if (y >= 0 && y < Height)
+                    e.Graphics.DrawLine(line, 0, y, Width, y);
+            }
+        }
 
         protected override void OnLayout(LayoutEventArgs levent)
         {
@@ -1151,21 +1253,29 @@ public sealed class MainForm : Form
 
     private Control BuildSendArea()
     {
-        var host = new Panel { Dock = DockStyle.Fill };
-        _sendBox = new TextBox
+        var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Canvas };
+        _sendBox = new ThemeTextBox
         {
             Multiline = true,
             Dock = DockStyle.Fill,
             ScrollBars = ScrollBars.Vertical,
+            BorderStyle = BorderStyle.None,
+            BackColor = Theme.Field,
+            ForeColor = Theme.Text,
+            Font = Theme.MonoFont(10F),
             Text = "abcdefg",            // 规格：发送框默认 ASC 内容
         };
-        _sendButton = new Button
+        var textHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(1), BackColor = Theme.Border };
+        textHost.Controls.Add(_sendBox);
+        _sendButton = new ThemeButton
         {
             Text = "发  送",
             Dock = DockStyle.Right,
-            Width = Math.Max(72, TextRenderer.MeasureText("发送", Font).Width + 28),
+            Width = Math.Max(Theme.Scale(this, 72), TextRenderer.MeasureText("发送", Font).Width + Theme.Scale(this, 28)),
+            Kind = ThemeButton.ButtonKind.Primary,
+            Font = new Font(Font, FontStyle.Bold),
         };
-        host.Controls.Add(_sendBox);
+        host.Controls.Add(textHost);
         host.Controls.Add(_sendButton);
         return host;
     }
@@ -1178,7 +1288,12 @@ public sealed class MainForm : Form
         _sentStatus = new ToolStripStatusLabel("S:0") { AutoSize = true };
         _recvStatus = new ToolStripStatusLabel("R:0") { AutoSize = true };
         _modemStatus = new ToolStripStatusLabel("CTS=- DSR=- RLSD=-") { AutoSize = true, Margin = new Padding(0, 3, 8, 2) };
+        _connStatus.ForeColor = Theme.Text;
+        _sentStatus.ForeColor = Theme.Amber;
+        _recvStatus.ForeColor = Theme.Accent;
+        _modemStatus.ForeColor = Theme.Muted;
         strip.Items.AddRange(new ToolStripItem[] { _connStatus, _sentStatus, _recvStatus, _modemStatus });
+        Theme.StyleStatus(strip);
         return strip;
     }
 
@@ -1811,15 +1926,15 @@ public sealed class MainForm : Form
             _modemStatus.Text = "CTS=- DSR=- RLSD=-";
         }
 
-        // 状态栏底色随接收计数分档（规格：20 万/50 万/100 万/200 万）
+        // 状态栏底色随接收计数分档（规格：20 万/50 万/100 万/200 万）；深色主题用低饱和暗色
         long n = _receive.Counter;
         _statusStrip.BackColor = n switch
         {
-            >= 2_000_000 => Color.FromArgb(255, 99, 71),    // 0x4763FF
-            >= 1_000_000 => Color.FromArgb(255, 160, 122),  // 0x7AA0FF
-            >= 500_000 => Color.FromArgb(255, 218, 185),    // 0xB9DAFF
-            >= 200_000 => Color.FromArgb(255, 235, 205),    // 0xCDEBFF
-            _ => SystemColors.Control,
+            >= 2_000_000 => Color.FromArgb(82, 38, 38),
+            >= 1_000_000 => Color.FromArgb(78, 46, 34),
+            >= 500_000 => Color.FromArgb(66, 50, 34),
+            >= 200_000 => Color.FromArgb(54, 48, 34),
+            _ => Theme.Surface2,
         };
 
         // 复选框高亮（规格：勾选时黄，否则系统色；加回车换行在 HEX发送 勾选时不亮）
@@ -1832,18 +1947,29 @@ public sealed class MainForm : Form
 
         // 校验组：模式 None(0) 时白底、否则黄底（标签跟随）
         bool verifying = _verifyBox.SelectedIndex > 0;
-        _verifyNumEdit.BackColor = verifying ? Color.Yellow : Color.White;
-        _tailCombo.BackColor = verifying ? Color.Yellow : Color.White;
-        _verifyBox.BackColor = verifying ? Color.Yellow : Color.White;
-        _crcBox.BackColor = verifying ? Color.Yellow : Color.White;
+        Color verifyBack = verifying ? Color.FromArgb(38, 36, 27) : Theme.Field;
+        _verifyNumEdit.BackColor = verifyBack;
+        _tailCombo.BackColor = verifyBack;
+        _verifyBox.BackColor = verifyBack;
+        _crcBox.BackColor = verifyBack;
 
         _timeoutLabel.Enabled = _timestampBox.Checked;           // 规格：超时标签随“加时间戳”
         _sentStatus.Text = $"S:{Interlocked.Read(ref _sentCount)}";
         _recvStatus.Text = $"R:{Interlocked.Read(ref _recvCount)}";
     }
 
-    private static void Highlight(Control c, bool on) =>
-        c.BackColor = on ? Color.Yellow : SystemColors.Control;
+    private static void Highlight(Control c, bool on)
+    {
+        if (c is ThemeCheckBox check)
+        {
+            check.Highlighted = on;
+            check.Invalidate();
+        }
+        else
+        {
+            c.BackColor = on ? Theme.WithAlpha(30, Theme.Amber) : Theme.Canvas;
+        }
+    }
 
     // ———————————————————————— M5：多条字符串 ————————————————————————
 
@@ -1893,14 +2019,18 @@ public sealed class MainForm : Form
             MaximizeBox = false,
             ShowInTaskbar = false,
             Font = Font,
+            BackColor = Theme.Canvas,
+            ForeColor = Theme.Text,
         };
-        var label = new Label { Text = "注释:", AutoSize = true, Location = new Point(10, 12) };
-        var box = new TextBox { Text = initial, Location = new Point(10, 34), Width = 276 };
-        var ok = new Button { Text = "确定", DialogResult = DialogResult.OK, Location = new Point(136, 64), Width = 70 };
-        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(216, 64), Width = 70 };
+        var label = new Label { Text = "注释:", AutoSize = true, Location = new Point(10, 12), ForeColor = Theme.Muted, BackColor = Color.Transparent };
+        var box = new ThemeTextBox { Text = initial, Location = new Point(10, 34), Width = 276 };
+        var ok = new ThemeButton { Text = "确定", DialogResult = DialogResult.OK, Location = new Point(136, 64), Width = 70, Kind = ThemeButton.ButtonKind.Primary };
+        var cancel = new ThemeButton { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(216, 64), Width = 70 };
         dlg.Controls.AddRange(new Control[] { label, box, ok, cancel });
         dlg.AcceptButton = ok;
         dlg.CancelButton = cancel;
+        Theme.ApplyWindow(dlg);
+        Theme.StyleRecursive(dlg);
         if (dlg.ShowDialog(this) != DialogResult.OK) return false;
         result = box.Text;
         return true;
@@ -1956,8 +2086,17 @@ public sealed class MainForm : Form
 
                 SendPayload(_rowData[step.Row].Text, _rowHex[step.Row].Checked);   // 再发送该行
 
-                for (int k = 0; k < _rowSend.Length; k++) _rowSend[k].ForeColor = Color.Black;
-                _rowSend[step.Row].ForeColor = Color.Red;   // 当前行按钮变红
+                for (int k = 0; k < _rowSend.Length; k++)
+                {
+                    if (_rowSend[k] is not ThemeButton button) continue;
+                    button.Kind = ThemeButton.ButtonKind.Default;
+                    button.Invalidate();
+                }
+                if (_rowSend[step.Row] is ThemeButton active)
+                {
+                    active.Kind = ThemeButton.ButtonKind.Outline;   // 当前发送行高亮
+                    active.Invalidate();
+                }
                 return;
         }
     }
@@ -2111,7 +2250,6 @@ public sealed class MainForm : Form
         // 构造期窗体不可见，Control.Visible 全为 false，左栏测宽要在显示后校正
         UpdateLeftColumnWidth();
         UpdateMinimumHeight();
-        SetCueBanner(_filePathBox, "未选择文件");
         SetCueBanner(_sendBox, "在此输入要发送的数据");
         StartMultiHandlePrewarm();
         // 规格：勾了“启动时立即打开串口”，启动后自动打开（串口）/连接（网络）。加载 ini 在这之前。
@@ -2299,6 +2437,20 @@ public sealed class MainForm : Form
             try { _ = c.Handle; } catch { }
         }
         if (_prewarmQueue.Count == 0) _prewarmTimer.Stop();
+    }
+
+    private void SelectMultiPage(int page)
+    {
+        for (int i = 0; i < IniDocument.MultiPageCount; i++)
+        {
+            if (_multiPages[i] is not null) _multiPages[i].Visible = i == page;
+            if (_multiTabs[i] is not null)
+            {
+                _multiTabs[i].Kind = i == page ? ThemeButton.ButtonKind.Outline : ThemeButton.ButtonKind.Default;
+                _multiTabs[i].Invalidate();
+            }
+        }
+        _multiPages[page]?.BringToFront();
     }
 
     private void ToggleMultiPanel()
@@ -2724,19 +2876,33 @@ public sealed class MainForm : Form
             _openImmediatelyItem.Checked = snap.OpenImmediately;
             _timestampBox.Checked = snap.Timestamp;
             _timeoutEdit.Text = snap.TimeoutMs;
-            _recvBox.BackColor = Color.FromArgb(snap.MemoBackColor);
-            Color fontColor = SystemColors.WindowText;
+            // 旧 ini 的默认白底/黑字/雅黑 9 号迁移到深色主题的默认值；用户显式改过的颜色不动。
+            int memoBack = snap.MemoBackColor == SystemColors.Window.ToArgb()
+                ? Theme.Log.ToArgb()
+                : snap.MemoBackColor;
+            _recvBox.BackColor = Color.FromArgb(memoBack);
+            Color fontColor;
             try
             {
-                fontColor = Color.FromArgb(snap.FontColor);
+                fontColor = snap.FontColor == SystemColors.WindowText.ToArgb()
+                    ? Theme.Text
+                    : Color.FromArgb(snap.FontColor);
             }
             catch
             {
-                // 颜色值非法时用系统文字色
+                fontColor = Theme.Text;
             }
             _recvBox.ForeColor = fontColor;
-            if (snap.FontName.Length > 0 &&
-                float.TryParse(snap.FontSize, System.Globalization.NumberStyles.Float,
+            string fontName = snap.FontName;
+            string fontSize = snap.FontSize;
+            if (fontName == "Microsoft YaHei UI" && fontSize == "9")
+            {
+                // 旧版本的默认字体；深色主题下默认换成等宽字体
+                fontName = "Consolas";
+                fontSize = "10";
+            }
+            if (fontName.Length > 0 &&
+                float.TryParse(fontSize, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out float size) &&
                 size > 0)
             {
@@ -2744,7 +2910,7 @@ public sealed class MainForm : Form
                 var style = (FontStyle)(snap.FontStyle & styleMask);
                 try
                 {
-                    using var loaded = new Font(snap.FontName, size, style, GraphicsUnit.Point);
+                    using var loaded = new Font(fontName, size, style, GraphicsUnit.Point);
                     ApplyRecvFont(loaded, fontColor);
                 }
                 catch

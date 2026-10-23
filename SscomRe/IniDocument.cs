@@ -333,7 +333,7 @@ public sealed class IniSnapshot
     public bool OpenImmediately { get; set; }
     public bool Timestamp { get; set; } = true;
     public string TimeoutMs { get; set; } = "20";
-    public int MemoBackColor { get; set; } = SystemColors.Window.ToArgb();
+    public int MemoBackColor { get; set; } = Theme.Log.ToArgb();
     public int DisplayLimit { get; set; } = 1_000_000;
     public string RemoteIp { get; set; } = "";
     public string RemotePort { get; set; } = "8080";
@@ -352,9 +352,9 @@ public sealed class IniSnapshot
     public int FormTop { get; set; } = 180;
     public int MultiPanelWidth { get; set; } = 515;
     public int MultiButtonWidth { get; set; } = 120;
-    public string FontName { get; set; } = "Microsoft YaHei UI";
-    public string FontSize { get; set; } = "9";
-    public int FontColor { get; set; } = SystemColors.WindowText.ToArgb();
+    public string FontName { get; set; } = "Consolas";
+    public string FontSize { get; set; } = "10";
+    public int FontColor { get; set; } = Theme.Text.ToArgb();
     /// <summary>FontStyle 标志：1 粗体、2 斜体、4 下划线、8 删除线。原程序不记这项，缺省为 0。</summary>
     public int FontStyle { get; set; }
     public string Language { get; set; } = "C";

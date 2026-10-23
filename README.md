@@ -3,7 +3,7 @@
 按逆向整理出的行为规格，用 **C# WinForms / .NET Framework 4.8** 重写 `sscom5.13.1.exe`（Delphi/VCL 串口网络调试工具）的日常收发功能。
 
 - 行为唯一依据：[sscom5.13.1-rewrite-spec.md](sscom5.13.1-rewrite-spec.md)
-- 当前状态：M1–M9 全部实现；`--selftest` 182/182 通过
+- 当前状态：M1–M9 全部实现，Phase 1 深色主题已接入；`--selftest` 182/182 通过
 - 目标系统：Windows 10/11（自带 .NET Framework 4.8）
 - 原版程序、解包镜像和反编译源码**不在本仓库中**，详见 [_analysis/README.md](_analysis/README.md)
 
@@ -45,6 +45,27 @@
 - 服务端按规格**只向第 0 个连接发送**；其余连接只读走数据，避免句柄泄漏
 - 模式切换时停定时器、断连接、切换串口/网络设置栏；网络模式字段按协议启用/禁用
 - UDP 收到数据时把发送方 IP 回填到「远程IP」
+
+### 界面主题（Phase 1）
+
+- 深色专业风：深海军蓝画布 + 青绿主操作 + 琥珀色“已启用/勾选”状态
+- 全自绘控件：按钮（含矢量图标）、复选框、下拉框、输入框、菜单、状态栏、多条分页
+- 窗口使用 DWM 深色标题栏与 Windows 11 圆角（Win10 自动降级），保留原生拖动/吸附/最大化
+- 接收区/发送区等宽字体，暗色滚动条；菜单勾选改用 `✓` 前缀，避免原生浅色勾选列
+- 多条字符串由原生 TabControl 改为自绘分页按钮，去掉系统浅色页框
+- 字体、字号、字形、文字颜色、背景颜色仍可调，并随 `sscom51.ini` 保存
+
+设计 token：
+
+| 用途 | 颜色 |
+|---|---|
+| 画布 | `#0B1119` |
+| 面板 | `#101620` |
+| 边框 | `#2C3A4E` |
+| 主文字 | `#DBE4EE` |
+| 次文字 | `#A7B5C6` |
+| 强调/连接 | `#2FC9B9` |
+| 已启用/发送 | `#F0B45A` |
 
 ### 参数与界面
 
@@ -118,6 +139,11 @@ _analysis/                    逆向分析脚本、DFM/Ghidra 产物（不含原
 SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
   Program.cs                  入口；--selftest；全局异常写 crash.log
   MainForm.cs                 主窗体、菜单、收发编排、ini 读写
+  Theme.cs                    主题 token、DWM、菜单/状态栏渲染
+  ThemeButton.cs              自绘按钮与矢量图标
+  ThemeCheckBox.cs            自绘复选框（琥珀勾选）
+  ThemeComboBox.cs            自绘下拉框（覆盖原生浅色按钮/滚动条）
+  ThemeTextBox.cs             深色输入框与占位文字
   ComPortService.cs           串口层
   NetworkService.cs           TCP 客户端/服务端/UDP
   ReceiveDisplay.cs           接收显示管线
@@ -142,6 +168,9 @@ SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
 - `N1058`（多条发送间隔）固定写 `1000`，读入时忽略（原程序用隐藏中转框，重写无此控件）
 - `N1080` 的 `1` 和 `2` 都映射为 TCPClient（照规格原文的怪癖）
 - 界面按物理像素布局、字体按 DPI 渲染；高 DPI（如 200%）下底栏占比明显变大，建议最大化窗口或降低显示缩放
+- Phase 1 只换皮，未重排布局；接收日志仍是普通 `TextBox`，整段单色，RX/TX 分色需要 Phase 2 的富文本日志控件
+- 标题栏使用原生 DWM 深色方案（保证拖动/吸附/最大化稳定）；完全自绘标题栏留到 Phase 2
+- 打开/保存文件、字体、颜色和 MessageBox 使用系统原生对话框，仍是系统浅色
 - 自检不依赖真实串口/网络硬件；实机串口收发仍需在目标机器上复验
 
 ## 故障排查
