@@ -124,20 +124,15 @@ taskkill //IM SscomRe.exe //F
 - 模式探测 `DetectMode()` 照原程序 FUN_00418188：切模式时停两个发送定时器（取消勾选）、置 `_abortFlag`、`_net.Disconnect()`、切面板、网络模式关串口并填本机 IP 列表；「启动时立即打开串口」勾着时网络模式自动连接。
 - 菜单：通讯端口（刷新 + 三协议项 + 动态端口项）、串口设置（更多串口设置 / 启动时立即打开串口）、显示（缓冲上限）、发送（发送文件设置 5 档 / 终端仿真设置 4 项）、多条字符串、帮助（关于）。
 
-### 5.5 布局 / DPI / 性能（2026-10-23 修，别改回去）
-程序是 PerMonitorV2，但窗体没有 `AutoScaleDimensions`，布局值是物理像素，而字体按当前 DPI 渲染。所有“随窗口伸缩”的行都必须按实际宽度/内容计算，不要再写死总宽度。
+### 5.5 布局 / DPI / 性能（2026-10-23 按原版重排，别改回去）
+程序是 PerMonitorV2，但窗体没有 `AutoScaleDimensions`，布局值是物理像素，而字体按当前 DPI 渲染。所有随窗口伸缩的行都必须按实际宽度/内容计算，不要写死总宽度。
 
-- 不换行的底部行（端口/网络栏）用 `RowFlowPanel`：按行高垂直居中。
-- 工具栏和两行设置用 `WrapRowPanel`：宽度固定为父容器宽度，按 `GetPreferredSize(width)` 自动增高，宽度不足时自动折行；折行后按“视觉行”垂直居中。不要给需要换行的 FlowLayoutPanel 设 `AutoSize=true`（它会保持内容宽度而不折行，右侧被裁）。
-- 行内右侧组：添加左侧控件后调用 `WrapRowPanel.MarkRightGroup()`，再添加右侧控件；`AlignRightGroup()` 会把标记后的控件推到各自视觉行的右边缘（折行到下一行也右对齐）。工具栏右侧是最前/保存参数/扩展/━；设置第一行右侧是发送选项；第二行右侧是发送文件/停止/清发送区。
-- 设置区有“接收/发送”灰色分组标签；发送选项和发送操作紧挨发送框上方，工具栏只保留文件/清除相关按钮。
-- 设置项用 `Group(...)` 把“标签+输入+单位”绑成一组，折行时不拆散。
-- 左栏宽度不写死：`UpdateLeftColumnWidth()` 按当前可见内容实测；切模式/自定义波特率可见性变化/OnShown 后重算。
-- 根布局的工具栏行和底栏行是 Absolute，但高度由 `UpdateToolbarRowHeight`/`UpdateBottomBandHeight` 按实际折行高度更新；`ScheduleResponsiveRelayout()` 在缩放后延迟做一次终排，避免同一轮布局中行高彼此错过。
-- 窗口最小尺寸 820×560；`UpdateMinimumHeight()` 再按当前折行高度保证底栏和状态栏不被挤出窗口。
-- 下栏更紧凑：串口/网络栏各 2 行（打开/更多/RTS/DTR/波特率同排；网络本地+连接/断开同排），发送框 2 行。`_lowerBand` 的 TableLayoutPanel 必须有 `RowStyles.Add(new RowStyle(SizeType.Percent, 100))`，否则行会按子控件理想高度撑高、第二行被裁。
-- 设置区默认只保留开关：`_timerValueGroup`、`_timeoutGroup`、`_verifyIndexGroup`、`_crcBox` 只在定时发送/加时间戳/校验方式打开时显示，由 `UpdateDependentVisibility()` 控制；打开后会按需折行。
-- 文件路径框缩到 12u 并加完整路径 tooltip；端口/波特率/自定义波特率下拉分别 10u/7u/6u，给发送框留宽度。
+- 底部是 2 列 4 行网格（`_bottomGrid`）：左列行 0 端口号、行 1 打开/刷新/更多串口设置、行 2 RTS/DTR/波特率（网络模式为远程/本地/连接断开）；右列行 0 选项、行 1 时间戳/超时/帧尾/校验、行 2-3 发送框+发送。左右行由同一个网格行高对齐。
+- 工具栏：左 清除窗口/打开文件 + 路径框（`WrapRowPanel.StretchControl` 填满中段）+ 右 发送文件/停止/清发送区/最前/保存参数/扩展/━。发送操作留在工具栏，不要移到设置区。
+- 设置里的“HEX发送/定时发送/加回车换行”用 `MakeGroup` 成组，窄窗时整组折行；所有原版控件保持可见，不做依赖显隐，也不要加“接收/发送”等自造标签。
+- `WrapRowPanel`：宽度固定为父宽、按 `GetPreferredSize(width)` 自动增高、按视觉行垂直居中；`MarkRightGroup`/`AlignRightGroup` 用于右侧组；`StretchControl` 用于路径框填充。不要给需要折行的 FlowLayoutPanel 设 `AutoSize=true`。
+- 左栏宽度由当前模式三行的实际内容测量（`UpdateLeftColumnWidth`）；`UpdateBottomGridRows` 把两行选项的实际高度写入网格行高；`BottomContentHeight` 计算底栏总高（两行选项 + 两行发送 + 边距）。不要用网格自身高度反推根行高（会形成布局循环）。
+- 窗口最小尺寸 820×560；`UpdateMinimumHeight()` 按当前折行高度保证底栏和状态栏不被挤出窗口；`ScheduleResponsiveRelayout()` 在缩放后延迟终排。
 - 多条字符串 99 行不再用 TableLayoutPanel：`MultiRowsPanel` 自绘布局（固定行高/列宽，一次定位）。行按钮调宽只改 `SendColumnWidth` 后 `PerformLayout()`。
 - 首次展开前 `_prewarmTimer` 在 OnShown 后分批创建多面板句柄（每 20ms 8 个）；这样展开只做布局（实测 ~0.4s，改回 TableLayoutPanel 会回到秒级）。
 - 接收框 `WordWrap = true`、`ScrollBars.Vertical`；接收追加走 `_displayTimer`（30ms 合并一次）和 `AppendRecv()`：在底部时跟随，向上翻看历史时保持滚动/光标。

@@ -47,7 +47,8 @@ public sealed class MainForm : Form
     private ToolStripStatusLabel _sentStatus = null!;
     private ToolStripStatusLabel _recvStatus = null!;
     private ToolStripStatusLabel _modemStatus = null!;
-    private Control _settingsBar = null!;
+    private WrapRowPanel _settingsRow1 = null!;
+    private WrapRowPanel _settingsRow2 = null!;
     private Control _sendArea = null!;
     private Button _hideToggleButton = null!;
     private Button _collapseButton = null!;
@@ -94,9 +95,6 @@ public sealed class MainForm : Form
     private readonly ToolTip _rowTip = new();
     private MultiRowsPanel _multiRows = null!;
     private Control _toolBar = null!;
-    private Control _timerValueGroup = null!;
-    private Control _timeoutGroup = null!;
-    private Control _verifyIndexGroup = null!;
     private bool _relayoutScheduled;
     private bool _updatingMin;
     private CheckBox _loopSendBox = null!;               // CheckBox6 循环发送
@@ -108,8 +106,8 @@ public sealed class MainForm : Form
 
     // —— M6：网络（TCP 客户端 / 服务端 / UDP）——
     private readonly NetworkService _net = new();
-    private Control _serialBar = null!;                  // 对应 PanelCom
-    private Control _netBar = null!;                     // 对应 PanelNet
+    private FlowLayoutPanel[] _serialRows = [];           // 左侧串口栏三行
+    private FlowLayoutPanel[] _netRows = [];              // 左侧网络栏三行
     private TextBox _remoteIpBox = null!;
     private TextBox _remotePortBox = null!;
     private TextBox _localPortBox = null!;
@@ -134,7 +132,7 @@ public sealed class MainForm : Form
     private Button _importIniButton = null!;
     private bool _loading;
     private int _multiPanelWidth = 515;                  // N1086，缺省 515
-    private TableLayoutPanel _lowerBand = null!;
+    private TableLayoutPanel _bottomGrid = null!;
     private TableLayoutPanel _rootLayout = null!;
     private string _ascSendText = "abcdefg";
     private string _hexSendText = "12 FF 00 30";
@@ -156,7 +154,6 @@ public sealed class MainForm : Form
         LoadConfig();
         UpdateLeftColumnWidth();
         UpdateStatus();
-        UpdateDependentVisibility();
     }
 
     // ———————————————————————— UI 构建 ————————————————————————
@@ -209,7 +206,7 @@ public sealed class MainForm : Form
     private int LineHeight() => Math.Max(28, Font.Height + 14);
 
     /// <summary>底部控制区：左侧三行端口，右侧两行选项加三行发送框。设置行换行时整体高度会增加。</summary>
-    private int BottomBandHeight() => LineHeight() * 4 + 4;
+    private int BottomBandHeight() => LineHeight() * 5 + 4;
 
     private void UpdateToolbarRowHeight(Control toolBar)
     {
@@ -224,30 +221,17 @@ public sealed class MainForm : Form
     {
         if (_relayoutScheduled || !IsHandleCreated) return;
         _relayoutScheduled = true;
-        BeginInvoke(new Action(() =>
-        {
-            _relayoutScheduled = false;
-            if (_rootLayout is null || _toolBar is null || _settingsBar is null) return;
-            int toolbarHeight = Math.Max(LineHeight(), _toolBar.Height);
-            int bottomHeight = Math.Max(LineHeight() * 2, _settingsBar.Height) + LineHeight() * 2 + 4;
-            RowStyle toolbarRow = _rootLayout.RowStyles[2];
-            if (Math.Abs(toolbarRow.Height - toolbarHeight) > 0.5f) toolbarRow.Height = toolbarHeight;
-            RowStyle bottomRow = _rootLayout.RowStyles[3];
-            if (Math.Abs(bottomRow.Height - bottomHeight) > 0.5f) bottomRow.Height = bottomHeight;
-            _rootLayout.PerformLayout();
-            UpdateMinimumHeight();
-        }));
     }
 
     private void UpdateMinimumHeight()
     {
-        if (_updatingMin || !IsHandleCreated || _toolBar is null || _settingsBar is null) return;
+        if (_updatingMin || !IsHandleCreated || _toolBar is null || _bottomGrid is null) return;
         _updatingMin = true;
         try
         {
             int required = (MainMenuStrip?.Height ?? 0)
                            + _toolBar.Height
-                           + _settingsBar.Height + LineHeight() * 2 + 4
+                           + BottomContentHeight() + 4
                            + (_statusStrip?.Height ?? 0)
                            + 130;
             int nonClient = Height - ClientSize.Height;
@@ -264,28 +248,32 @@ public sealed class MainForm : Form
         }
     }
 
-    /// <summary>定时/时间戳/校验的附属输入只在对应开关打开时显示，默认保持下栏紧凑。</summary>
-    private void UpdateDependentVisibility()
+    private void UpdateBottomGridRows()
     {
-        if (_timerValueGroup is null) return;
-        bool verifying = _verifyBox.SelectedIndex > 0;
-        SetVisible(_timerValueGroup, _timerSendBox.Checked);
-        SetVisible(_timeoutGroup, _timestampBox.Checked);
-        SetVisible(_verifyIndexGroup, verifying);
-        SetVisible(_crcBox, verifying);
+        if (_bottomGrid is null || _settingsRow1 is null || _settingsRow2 is null) return;
+        int h0 = Math.Max(LineHeight(), _settingsRow1.Height);
+        int h1 = Math.Max(LineHeight(), _settingsRow2.Height);
+        int h2 = LineHeight() + 2;
+        SetGridRowHeight(0, h0);
+        SetGridRowHeight(1, h1);
+        UpdateBottomBandHeight();
     }
 
-    private static void SetVisible(Control control, bool visible)
+    private void SetGridRowHeight(int row, int height)
     {
-        if (control.Visible != visible) control.Visible = visible;
+        RowStyle style = _bottomGrid.RowStyles[row];
+        if (Math.Abs(style.Height - height) > 0.5f) style.Height = height;
     }
+
+    private int BottomContentHeight() =>
+        (_settingsRow1 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow1.Height))
+        + (_settingsRow2 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow2.Height))
+        + (LineHeight() + 2) * 2;
 
     private void UpdateBottomBandHeight()
     {
-        if (_rootLayout is null || _settingsBar is null) return;
-        int settingsHeight = Math.Max(LineHeight() * 2, _settingsBar.Height);
-        int lowerHeight = LineHeight() * 2 + 4;
-        int h = settingsHeight + lowerHeight;
+        if (_rootLayout is null || _bottomGrid is null) return;
+        int h = BottomContentHeight() + 4;
         RowStyle style = _rootLayout.RowStyles[3];
         if (Math.Abs(style.Height - h) > 0.5f) style.Height = h;
     }
@@ -408,50 +396,58 @@ public sealed class MainForm : Form
     private Control BuildBottomBand()
     {
         var band = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0), Padding = new Padding(2, 0, 2, 0) };
-
-        _serialBar = BuildSerialBar();
-        _netBar = BuildNetBar();
-        _netBar.Visible = false;
-
-        var lower = new TableLayoutPanel
+        var grid = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 1,
+            RowCount = 4,
             Margin = new Padding(0),
         };
-        _lowerBand = lower;
-        lower.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        lower.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 248));
-        lower.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        _bottomGrid = grid;
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight()));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight()));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight() + 2));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight() + 2));
 
-        var left = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 6, 0) };
-        left.Controls.Add(_serialBar);
-        left.Controls.Add(_netBar);
+        _serialRows = BuildSerialRows();
+        _netRows = BuildNetRows();
+        for (int i = 0; i < 3; i++)
+        {
+            var cell = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 6, 0) };
+            _netRows[i].Visible = false;
+            cell.Controls.Add(_serialRows[i]);
+            cell.Controls.Add(_netRows[i]);
+            grid.Controls.Add(cell, 0, i);
+        }
+
+        _settingsRow1 = BuildOptionsRow();
+        grid.Controls.Add(_settingsRow1, 1, 0);
+        _settingsRow2 = BuildVerifyRow();
+        grid.Controls.Add(_settingsRow2, 1, 1);
         _sendArea = BuildSendArea();
-        lower.Controls.Add(left, 0, 0);
-        lower.Controls.Add(_sendArea, 1, 0);
+        grid.Controls.Add(_sendArea, 1, 2);
+        grid.SetRowSpan(_sendArea, 2);
+
+        _settingsRow1.SizeChanged += (_, _) => { UpdateBottomGridRows(); ScheduleResponsiveRelayout(); };
+        _settingsRow2.SizeChanged += (_, _) => { UpdateBottomGridRows(); ScheduleResponsiveRelayout(); };
+        UpdateBottomGridRows();
+        band.Controls.Add(grid);
         UpdateLeftColumnWidth();
-
-        _settingsBar = BuildSettingsBar();
-        _settingsBar.Dock = DockStyle.Top;
-        _settingsBar.SizeChanged += (_, _) => { UpdateBottomBandHeight(); ScheduleResponsiveRelayout(); };
-
-        band.Controls.Add(lower);
-        band.Controls.Add(_settingsBar);
         return band;
     }
 
-    /// <summary>
-    /// 左栏按当前可见内容测宽。窗体是 PerMonitorV2，但布局按物理像素写死；
-    /// 125%/150% 缩放下字体变宽，固定 248px 会把“波特率”下拉裁掉。
-    /// </summary>
     private void UpdateLeftColumnWidth()
     {
-        if (_lowerBand is null) return;
-        Control bar = _netMode == NetMode.Serial ? _serialBar : _netBar;
-        int need = MaxRowWidth(bar) + 6;   // 与右侧发送区留 6px 间隔（left 的右边距）
-        _lowerBand.ColumnStyles[0].Width = Math.Max(236, need);
+        if (_bottomGrid is null) return;
+        int need = 0;
+        for (int i = 0; i < 3; i++)
+        {
+            FlowLayoutPanel row = _netMode == NetMode.Serial ? _serialRows[i] : _netRows[i];
+            need = Math.Max(need, FlowContentWidth(row));
+        }
+        _bottomGrid.ColumnStyles[0].Width = Math.Max(240, need + 6);
     }
 
     private static int FlowContentWidth(FlowLayoutPanel row, bool onlyVisible = true)
@@ -462,387 +458,6 @@ public sealed class MainForm : Form
                 w += c.Width + c.Margin.Horizontal;
         return w;
     }
-
-    private static int MaxRowWidth(Control? root, bool onlyVisible = true)
-    {
-        if (root is null) return 0;
-        int max = 0;
-        foreach (Control child in root.Controls)
-            if (child is FlowLayoutPanel row)
-                max = Math.Max(max, FlowContentWidth(row, onlyVisible));
-        return max;
-    }
-
-    private Control BuildSerialBar()
-    {
-        int unit = TextUnit();
-        var grid = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            Margin = new Padding(0),
-        };
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-
-        _portCombo = new ComboBox { Width = unit * 10, DropDownStyle = ComboBoxStyle.DropDown };
-        _openButton = new Button { Text = "打开串口", AutoSize = true };
-        _baudCombo = new ComboBox { Width = unit * 7, DropDownStyle = ComboBoxStyle.DropDownList };
-        foreach (var b in ComPortService.BaudItems) _baudCombo.Items.Add(b);
-        _baudCombo.SelectedIndex = 13; // 115200
-        _customBaudBox = new TextBox { Width = unit * 6, Text = _port.CustomBaud.ToString(), Visible = false };
-        _customBaudBox.VisibleChanged += (_, _) => UpdateLeftColumnWidth();
-        _rtsBox = new CheckBox { Text = "RTS", AutoSize = true };
-        _dtrBox = new CheckBox { Text = "DTR", AutoSize = true };
-        _moreSettingsButton = new Button { Text = "更多串口设置", AutoSize = true };
-        _moreSettingsButton.Click += (_, _) => ShowPortSettings();
-
-        var row1 = MakeLine();
-        Put(row1, new Label { Text = "端口号", AutoSize = true });
-        Put(row1, _portCombo);
-        var refresh = new Button { Text = "↻", AutoSize = true };
-        refresh.Click += (_, _) => RefreshPortList();
-        _rowTip.SetToolTip(refresh, "刷新串口列表");
-        Put(row1, refresh);
-        var row2 = MakeLine();
-        Put(row2, _openButton);
-        Put(row2, _moreSettingsButton);
-        Put(row2, _rtsBox);
-        Put(row2, _dtrBox);
-        Put(row2, new Label { Text = "波特率", AutoSize = true });
-        Put(row2, _baudCombo);
-        Put(row2, _customBaudBox);
-        grid.Controls.Add(row1, 0, 0);
-        grid.Controls.Add(row2, 0, 1);
-        return grid;
-    }
-
-    /// <summary>网络设置栏（对应 PanelNet）：远程IP/端口、本地IP/端口、连接、断开。</summary>
-    private Control BuildNetBar()
-    {
-        int unit = TextUnit();
-        var grid = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            Margin = new Padding(0),
-        };
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        Label Lb(string text) => new() { Text = text, AutoSize = true };
-
-        _remoteIpBox = new TextBox { Width = unit * 12 };
-        _remotePortBox = new TextBox { Width = unit * 6, Text = "8080" };
-        _localIpCombo = new ComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDown };
-        _localPortBox = new TextBox { Width = unit * 6, Text = "8080" };
-        _connectButton = new Button { Text = "连接", AutoSize = true };
-        _disconnectButton = new Button { Text = "断开", AutoSize = true };
-        _connectButton.Click += (_, _) => ConnectNetwork();
-        _disconnectButton.Click += (_, _) => DisconnectNetwork();
-
-        var row1 = MakeLine();
-        Put(row1, Lb("远程"));
-        Put(row1, _remoteIpBox);
-        Put(row1, Lb("端口"));
-        Put(row1, _remotePortBox);
-        var row2 = MakeLine();
-        Put(row2, Lb("本地"));
-        Put(row2, _localIpCombo);
-        Put(row2, Lb("端口"));
-        Put(row2, _localPortBox);
-        Put(row2, _connectButton);
-        Put(row2, _disconnectButton);
-        grid.Controls.Add(row1, 0, 0);
-        grid.Controls.Add(row2, 0, 1);
-        return grid;
-    }
-
-    private Control BuildToolBar()
-    {
-        var panel = MakeWrapLine();
-        Put(panel, ActionButton("清除窗口", ClearReceive));
-        Put(panel, ActionButton("打开文件", OpenFile));
-        _filePathBox = new TextBox { Width = TextUnit() * 12, ReadOnly = true, BackColor = SystemColors.Window };
-        Put(panel, _filePathBox);
-
-        panel.MarkRightGroup();
-        _topmostBox = new CheckBox { Text = "最前", AutoSize = true };
-        Put(panel, _topmostBox);
-        Put(panel, ActionButton("保存参数", SaveConfig));
-        _hideToggleButton = ActionButton("扩展", ToggleMultiPanel);
-        _collapseButton = ActionButton("━", ToggleBottomPanels);
-        Put(panel, _hideToggleButton);
-        Put(panel, _collapseButton);
-        return panel;
-    }
-
-    private Control BuildSettingsBar()
-    {
-        // 每行左侧接收、右侧发送，右侧组在行内右对齐；窄窗时自动折行。
-        var host = new Panel { Dock = DockStyle.Top, Margin = new Padding(0), Width = 1200 };
-        var row1 = MakeWrapLine();
-        var row2 = MakeWrapLine();
-
-        CheckBox Cb(string text, bool @checked = false) =>
-            new() { Text = text, AutoSize = true, Checked = @checked };
-        Label Lb(string text) => new() { Text = text, AutoSize = true };
-        Label Section(string text) => new() { Text = text, AutoSize = true, ForeColor = SystemColors.GrayText };
-
-        int unit = TextUnit();
-        Put(row1, Section("接收"));
-        _hexDisplayBox = Cb("HEX显示");
-        Put(row1, _hexDisplayBox);
-        Put(row1, ActionButton("保存数据", SaveData));
-        _recvToFileBox = Cb("接收数据到文件");
-        Put(row1, _recvToFileBox);
-
-        row1.MarkRightGroup();
-        Put(row1, Section("发送"));
-        _hexSendBox = Cb("HEX发送");
-        Put(row1, _hexSendBox);
-        _timerSendBox = Cb("定时发送:");
-        Put(row1, _timerSendBox);
-        _timerIntervalEdit = new TextBox { Text = "1000", Width = unit * 4 };
-        _timerValueGroup = Group(_timerIntervalEdit, Lb("ms/次"));
-        Put(row1, _timerValueGroup);
-        _newLineBox = Cb("加回车换行");
-        Put(row1, _newLineBox);
-
-        _timestampBox = Cb("加时间戳和分包显示", @checked: true);
-        Put(row2, _timestampBox);
-        _timeoutLabel = Lb("超时时间:");
-        _timeoutEdit = new TextBox { Text = "20", Width = unit * 4 };
-        _timeoutGroup = Group(_timeoutLabel, _timeoutEdit, Lb("ms"));
-        Put(row2, _timeoutGroup);
-        _verifyNumEdit = new TextBox { Text = "1", Width = unit * 3 };
-        _tailCombo = new ComboBox { Width = unit * 14, DropDownWidth = unit * 42, DropDownStyle = ComboBoxStyle.DropDownList };
-        _tailCombo.Items.AddRange(new object[]
-        {
-            "末尾 (无帧尾字节)",
-            "第-1 (最后1个字节是帧尾,校验插在帧尾前面)",
-            "第-2 (最后2个字节是帧尾,校验插在帧尾前面)",
-            "第-3 (最后3个字节是帧尾,校验插在帧尾前面)",
-            "第-4 (最后4个字节是帧尾,校验插在帧尾前面)",
-        });
-        _tailCombo.SelectedIndex = 0;
-        _verifyIndexGroup = Group(Lb("第"), _verifyNumEdit, Lb("字节至"), _tailCombo);
-        Put(row2, _verifyIndexGroup);
-        _verifyBox = new ComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDownList };
-        _verifyBox.Items.AddRange(new object[] { "None", "ModbusCRC16", "CCITT-CRC16", "CRC32", "0-ADD8", "ADD8", "XOR8", "ADD16" });
-        _verifyBox.SelectedIndex = 0;
-        _crcBox = new TextBox { Width = unit * 8, ReadOnly = true, TabStop = false };
-        Put(row2, Group(Lb("加校验"), _verifyBox, _crcBox));
-
-        row2.MarkRightGroup();
-        _sendFileButton = ActionButton("发送文件", SendFile);
-        Put(row2, _sendFileButton);
-        Put(row2, ActionButton("停止", StopSendFile));
-        Put(row2, ActionButton("清发送区", () => _sendBox.Clear()));
-
-        host.Controls.Add(row2);
-        host.Controls.Add(row1);
-        void SyncHeight()
-        {
-            int h = Math.Max(LineHeight(), row1.Height) + Math.Max(LineHeight(), row2.Height);
-            if (host.Height != h) host.Height = h;
-        }
-        row1.SizeChanged += (_, _) => SyncHeight();
-        row2.SizeChanged += (_, _) => SyncHeight();
-        SyncHeight();
-        return host;
-    }
-
-    /// <summary>单行，不换行。控件保持自身宽度，避免把「加时间戳」拆成两行。</summary>
-    private FlowLayoutPanel MakeLine() => new RowFlowPanel
-    {
-        Dock = DockStyle.Fill,
-        WrapContents = false,
-        AutoSize = false,
-        FlowDirection = FlowDirection.LeftToRight,
-        Margin = new Padding(0),
-        Padding = new Padding(2, 1, 2, 0),
-    };
-
-    /// <summary>可换行的一行：宽度不够时自动折到下一行，高度随内容增长。</summary>
-    private WrapRowPanel MakeWrapLine() => new WrapRowPanel
-    {
-        Dock = DockStyle.Top,
-        WrapContents = true,
-        AutoSize = false,
-        Height = LineHeight(),
-        FlowDirection = FlowDirection.LeftToRight,
-        Margin = new Padding(0),
-        Padding = new Padding(2, 1, 2, 1),
-        Width = 1200,   // 构造期先按宽窗口排一次，避免在默认 200px 宽度下反复折行
-    };
-
-    /// <summary>不换行行内的垂直居中（固定行高区域用）。</summary>
-    private sealed class RowFlowPanel : FlowLayoutPanel
-    {
-        protected override void OnLayout(LayoutEventArgs levent)
-        {
-            base.OnLayout(levent);
-            int h = ClientSize.Height - Padding.Vertical;
-            foreach (Control c in Controls)
-            {
-                int y = Padding.Top + Math.Max(0, (h - c.Height) / 2);
-                if (c.Top != y) c.Top = y;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 可换行行：宽度固定为父容器宽度（AutoSize=false），按首选高度自动增高，
-    /// 再按“视觉行”垂直居中。AutoSize=true 会让宽度保持内容宽度而不换行，导致右侧被裁。
-    /// </summary>
-    private sealed class WrapRowPanel : FlowLayoutPanel
-    {
-        private bool _adjusting;
-        private int _rightStart = int.MaxValue;
-
-        public void MarkRightGroup() => _rightStart = Controls.Count;
-
-        protected override void OnLayout(LayoutEventArgs levent)
-        {
-            if (_adjusting)
-            {
-                base.OnLayout(levent);
-                return;
-            }
-            _adjusting = true;
-            try
-            {
-                base.OnLayout(levent);
-                if (ClientSize.Width > 0)
-                {
-                    int desired = GetPreferredSize(new Size(ClientSize.Width, 0)).Height;
-                    int min = Math.Max(28, Font.Height + 14);
-                    if (desired < min) desired = min;
-                    if (Height != desired) Height = desired;
-                }
-                CenterLines();
-                AlignRightGroup();
-            }
-            finally
-            {
-                _adjusting = false;
-            }
-        }
-
-        /// <summary>把标记之后的控件整体推到行右边缘；窄窗折到下一行时也右对齐。</summary>
-        private void AlignRightGroup()
-        {
-            if (_rightStart >= Controls.Count) return;
-            int width = ClientSize.Width;
-            if (width <= 0) return;
-            var rightSet = new HashSet<Control>();
-            for (int i = _rightStart; i < Controls.Count; i++) rightSet.Add(Controls[i]);
-
-            var rows = new List<List<Control>>();
-            List<Control>? current = null;
-            int prevLeft = int.MinValue;
-            foreach (Control c in Controls)
-            {
-                if (!c.Visible) continue;
-                if (current is null || c.Left <= prevLeft)
-                {
-                    current = new List<Control>();
-                    rows.Add(current);
-                }
-                current.Add(c);
-                prevLeft = c.Left;
-            }
-
-            int rightEdge = width - Padding.Right;
-            foreach (var row in rows)
-            {
-                var rights = row.Where(c => rightSet.Contains(c)).ToList();
-                if (rights.Count == 0) continue;
-                int maxRight = rights.Max(c => c.Right + c.Margin.Right);
-                int shift = rightEdge - maxRight;
-                if (shift <= 0) continue;
-                foreach (Control c in rights) c.Left += shift;
-            }
-        }
-
-        private void CenterLines()
-        {
-            int count = Controls.Count;
-            int start = 0;
-            while (start < count)
-            {
-                int end = start + 1;
-                int prevLeft = Controls[start].Left;
-                while (end < count && Controls[end].Left > prevLeft)
-                {
-                    prevLeft = Controls[end].Left;
-                    end++;
-                }
-                int top = int.MaxValue, bottom = int.MinValue;
-                for (int i = start; i < end; i++)
-                {
-                    Control c = Controls[i];
-                    top = Math.Min(top, c.Top - c.Margin.Top);
-                    bottom = Math.Max(bottom, c.Bottom + c.Margin.Bottom);
-                }
-                int rowHeight = Math.Max(1, bottom - top);
-                for (int i = start; i < end; i++)
-                {
-                    Control c = Controls[i];
-                    int available = rowHeight - c.Margin.Vertical;
-                    int y = top + c.Margin.Top + Math.Max(0, (available - c.Height) / 2);
-                    if (c.Top != y) c.Top = y;
-                }
-                start = end;
-            }
-        }
-    }
-
-    private static Button ActionButton(string text, Action? onClick = null)
-    {
-        var button = new Button { Text = text, AutoSize = true };
-        if (onClick != null) button.Click += (_, _) => onClick();
-        return button;
-    }
-
-    private static void Put(FlowLayoutPanel line, Control control)
-    {
-        control.Margin = new Padding(3, 2, 2, 2);
-        if (control is Label or CheckBox)
-            control.AutoSize = true;
-        if (control is Button button)
-        {
-            button.AutoSize = true;
-            button.Margin = new Padding(2, 1, 2, 1);
-        }
-        line.Controls.Add(control);
-    }
-
-    /// <summary>把“标签+输入+单位”绑成一组，折行时不会被拆散。</summary>
-    private static FlowLayoutPanel Group(params Control[] controls)
-    {
-        var group = new RowFlowPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = false,
-            FlowDirection = FlowDirection.LeftToRight,
-            Margin = new Padding(0),
-            Padding = new Padding(0),
-        };
-        foreach (Control control in controls)
-        {
-            control.Margin = new Padding(3, 2, 2, 2);
-            if (control is Button button)
-                button.Margin = new Padding(2, 1, 2, 1);
-            group.Controls.Add(control);
-        }
-        return group;
-    }
-
-    private int TextUnit() => Math.Max(7, TextRenderer.MeasureText("0", Font).Width);
 
     private Control BuildCenter()
     {
@@ -1103,9 +718,6 @@ public sealed class MainForm : Form
             if (!_loading) UpdateStatus();
         };
         _hexSendBox.CheckedChanged += (_, _) => OnHexSendModeChanged();
-        _timerSendBox.CheckedChanged += (_, _) => UpdateDependentVisibility();
-        _timestampBox.CheckedChanged += (_, _) => UpdateDependentVisibility();
-        _verifyBox.SelectedIndexChanged += (_, _) => UpdateDependentVisibility();
         _filePathBox.TextChanged += (_, _) => _rowTip.SetToolTip(_filePathBox, _filePathBox.Text);
         _sendBox.TextChanged += (_, _) => RememberSendText();
         _rtsBox.Click += (_, _) => ApplyModemLine(_rtsBox, v => _port.ApplyRts(v), "RTS");
@@ -1746,7 +1358,6 @@ public sealed class MainForm : Form
         _crcBox.BackColor = verifying ? Color.Yellow : Color.White;
 
         _timeoutLabel.Enabled = _timestampBox.Checked;           // 规格：超时标签随“加时间戳”
-        UpdateDependentVisibility();
         _sentStatus.Text = $"S:{Interlocked.Read(ref _sentCount)}";
         _recvStatus.Text = $"R:{Interlocked.Read(ref _recvCount)}";
     }
@@ -1913,8 +1524,12 @@ public sealed class MainForm : Form
 
     private void UpdateModePanels()
     {
-        _serialBar.Visible = _netMode == NetMode.Serial;
-        _netBar.Visible = _netMode != NetMode.Serial;
+        bool serial = _netMode == NetMode.Serial;
+        for (int i = 0; i < 3; i++)
+        {
+            _serialRows[i].Visible = serial;
+            _netRows[i].Visible = !serial;
+        }
         UpdateLeftColumnWidth();
     }
 
@@ -2219,8 +1834,9 @@ public sealed class MainForm : Form
     private void ToggleBottomPanels()
     {
         // 规格：━ 按钮隐藏/恢复设置区与信息条；标题在 ■ / ━ 间切换
-        bool show = !_settingsBar.Visible;
-        _settingsBar.Visible = show;
+        bool show = !_settingsRow1.Visible;
+        _settingsRow1.Visible = show;
+        _settingsRow2.Visible = show;
         _sendArea.Visible = show;
         _collapseButton.Text = show ? "━" : "■";
     }
