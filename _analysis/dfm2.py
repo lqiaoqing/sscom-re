@@ -8,8 +8,9 @@ before each OnClick we find the nearest Caption, and the nearest object header
 """
 import re
 import struct
+from pathlib import Path
 
-IMAGE = r"D:\Work\workspace\sscom-re\sscom5.13.1.unpacked.exe"
+IMAGE = str(Path(__file__).resolve().parent.parent / "sscom5.13.1.unpacked.exe")
 data = open(IMAGE, "rb").read()
 LO, HI = 0x523000 - 0x400000, 0x537000 - 0x400000
 blob = data[LO:HI]

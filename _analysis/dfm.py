@@ -8,8 +8,9 @@ Prints (type, name, Caption, OnClick) plus selected other props.
 """
 import struct
 import sys
+from pathlib import Path
 
-IMAGE = r"D:\Work\workspace\sscom-re\sscom5.13.1.unpacked.exe"
+IMAGE = str(Path(__file__).resolve().parent.parent / "sscom5.13.1.unpacked.exe")
 data = open(IMAGE, "rb").read()
 
 RSRC_LO, RSRC_HI = 0x523000 - 0x400000, 0x537000 - 0x400000

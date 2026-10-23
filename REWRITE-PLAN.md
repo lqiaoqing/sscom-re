@@ -2,7 +2,7 @@
 
 依据：`sscom5.13.1-rewrite-spec.md`。「重写时可以直接当规则用的部分」+ 正文标为 观察/推断 的行为逐条对照实现；不实现文末「还不能当规则用的部分」和用户已排除的功能。
 
-工程：`SscomRe/`（`dotnet run --project SscomRe` 运行，`dotnet build` 编译；输出统一到 `SscomRe/bin/net48/`）。
+工程：`SscomRe/`（`dotnet build -c Release` 编译，运行 `SscomRe/bin/net48/SscomRe.exe`；输出统一到 `SscomRe/bin/net48/`）。
 
 硬约束（延续项目约定）：
 - 不把对象偏移、函数地址等原始地址写进新程序；代码只写行为。
@@ -29,7 +29,16 @@
 - 校验范围 = 全部字节去掉帧头 N1 和帧尾 N2；插到 `长度 − N2 + 1`（1 基）。
 - 发送回显：`\r\n[HH:MM:SS.mmm]发→◇` 前缀 + HEX 文本。
 
+## 验证
+
+- `dotnet build -c Release`：0 警告 0 错误
+- `SscomRe.exe --selftest`：`pass=182 fail=0`（组包/校验/接收/多条/ini/终端/几何/布局）
+- 启动冒烟 ≥5 秒无 `crash.log`
+- 界面布局测试按 `DeviceDpi` 缩放窗口；自检开始前备份、结束后恢复 `sscom51.ini`
+
 ## 不能实现 / 已排除
 
 - 烧写器（STM/GD32、STC/IAP15）：spec 命令字节未知且用户已排除。
-- 数据波形、English 切换、字体/背景色（按 M9 自行设计取舍）、转换计算器、LUA、帮助页、广告条。
+- 数据波形、English 切换、转换计算器、LUA、帮助页、广告/更新检查。
+- 规格未写数值的项不猜；已知取舍见 `HANDOFF.md` §7（N1058、N1080 的 1/2、Custom 流控、CPort 设置对话框）。
+- 高 DPI 只做了按物理像素的响应式布局，200% 缩放下底栏占比偏大，未做完整 DPI 自适应。

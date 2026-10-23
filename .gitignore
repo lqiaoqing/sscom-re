@@ -33,3 +33,10 @@ Desktop.ini
 sscom5.13.1.exe
 sscom5.13.1.unpacked.exe
 _analysis/decomp/
+
+# Ghidra project descriptors live with the (ignored) .rep database
+_analysis/ghidra/*.gpr
+
+# Python bytecode
+__pycache__/
+*.pyc

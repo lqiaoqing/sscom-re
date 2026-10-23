@@ -1,5 +1,6 @@
 import sys
-data=open(r"D:\Work\workspace\sscom-re\sscom5.13.1.unpacked.exe","rb").read()
+from pathlib import Path
+data=open(Path(__file__).resolve().parent.parent / "sscom5.13.1.unpacked.exe","rb").read()
 def s(va,n=80):
     o=va-0x400000; seg=data[o:o+n]; e=seg.find(b'\x00')
     return seg[:e].decode('gbk','replace')

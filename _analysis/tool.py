@@ -10,10 +10,11 @@ import os
 import re
 import struct
 import sys
+from pathlib import Path
 
 import capstone
 
-IMAGE = r"D:\Work\workspace\sscom-re\sscom5.13.1.unpacked.exe"
+IMAGE = str(Path(__file__).resolve().parent.parent / "sscom5.13.1.unpacked.exe")
 BASE = 0x400000
 
 with open(IMAGE, "rb") as _f:

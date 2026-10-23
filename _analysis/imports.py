@@ -12,9 +12,10 @@ GetLocalTime@0x516410 (kernel32).
 import json
 import re
 import struct
+from pathlib import Path
 
-IMAGE = r"D:\Work\workspace\sscom-re\sscom5.13.1.unpacked.exe"
-OUT = r"D:\Work\workspace\sscom-re\_analysis\iat_map.json"
+IMAGE = str(Path(__file__).resolve().parent.parent / "sscom5.13.1.unpacked.exe")
+OUT = str(Path(__file__).resolve().parent / "iat_map.json")
 
 IDA_START = 0x516000
 IDA_END = 0x51a000

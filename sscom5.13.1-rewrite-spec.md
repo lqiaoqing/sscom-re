@@ -1,6 +1,6 @@
 # SSCOM 5.13.1 重写行为规格
 
-目标镜像：`D:\Work\workspace\sscom-re\sscom5.13.1.unpacked.exe`
+目标镜像：`sscom5.13.1.unpacked.exe`（放在仓库根目录；原程序与镜像均未纳入版本库）
 
 SHA-256：`85efc6d9b7c55ea150f81ffbc62d6141d0011dc86b83dd81ff84af885e197aee`
 

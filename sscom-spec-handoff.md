@@ -1,5 +1,7 @@
 # SSCOM 5.13.1 规格补全交接
 
+> **状态（2026-10-23）：规格补全与 M1–M9 重写均已完成。** 本文保留为当时的任务书与逆向方法记录；文中 `D:\Work\workspace\sscom-re` 是旧工作目录，当前仓库以相对路径为准。原程序、解包镜像与反编译源码未纳入版本库，见 [README](README.md) 与 [_analysis/README.md](_analysis/README.md)。
+
 下一个 agent 的任务：把用户确认要补的剩余行为写进规格。不要开始重写程序。不要做用户已排除的功能。
 
 ## Suggested skills
@@ -33,7 +35,7 @@
 | `D:\Work\workspace\sscom-re\sscom5.13.1-rewrite-spec.md` | **唯一要改的文件。** UTF-8。已有打开、线路参数、校验、HEX 发送标志、99 行发送、TCP/UDP 发送、接收显示。 |
 | `D:\Work\workspace\sscom-re\sscom5.13.1.unpacked.exe` | 分析用镜像。基址 `0x400000`，文件偏移 = RVA。SHA-256 `85efc6d9b7c55ea150f81ffbc62d6141d0011dc86b83dd81ff84af885e197aee`。 |
 | `D:\Work\workspace\sscom-re\sscom5.13.1.exe` | 仍加壳，补规格不需要。 |
-| `C:\Users\zsj\AppData\Roaming\grokapp\grok-app\data\attachments\paste\20261013-154929-868-paste.png` | 原界面截图（串口已打开、多条字符串页）。 |
+| 原界面截图（历史附件，未纳入仓库） | 串口已打开、多条字符串页；界面截图可参考 `_analysis/title_bar.png`、`_analysis/btn_row*.png`。 |
 
 规格里的地址、字段、算法不要在交接里复述，以该文件为准。
 
