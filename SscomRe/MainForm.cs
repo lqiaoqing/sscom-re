@@ -151,6 +151,17 @@ public sealed partial class MainForm : Form
     private TableLayoutPanel _rootLayout = null!;
     private TableLayoutPanel _bodyLayout = null!;
     private Panel _sidePanel = null!;
+    private Control _sideContent = null!;
+    private Panel _railPanel = null!;
+    private ThemeButton _railExpand = null!;
+    private ThemeButton _railOpen = null!;
+    private Label _railModeLabel = null!;
+    private Label _railPortLabel = null!;
+    private Label _railDot = null!;
+    private bool _sideCollapsed;
+    private bool _sideAutoCollapsed;
+    private bool _sideManualOverride;
+    private bool _sideUserCollapsed;
     private TableLayoutPanel _serialSection = null!;
     private TableLayoutPanel _netSection = null!;
     private Label _sideModeLabel = null!;
@@ -273,9 +284,18 @@ public sealed partial class MainForm : Form
             int toolbarHeight = Math.Max(LineHeight(), _toolBar.Height);
             RowStyle toolbarRow = _rootLayout.RowStyles[0];
             if (Math.Abs(toolbarRow.Height - toolbarHeight) > 0.5f) toolbarRow.Height = toolbarHeight;
+
+            if (!_sideManualOverride)
+            {
+                bool narrow = ClientSize.Width < SidebarWidth() + 720;
+                if (narrow && !_sideCollapsed)
+                    SetSidebarCollapsed(true, persist: false, manual: false, automatic: true);
+                else if (!narrow && _sideAutoCollapsed)
+                    SetSidebarCollapsed(false, persist: false, manual: false, automatic: true);
+            }
             if (_bodyLayout is not null)
             {
-                float wanted = SidebarWidth();
+                float wanted = _sideCollapsed ? RailWidth() : SidebarWidth();
                 if (Math.Abs(_bodyLayout.ColumnStyles[0].Width - wanted) > 0.5f)
                     _bodyLayout.ColumnStyles[0].Width = wanted;
             }
@@ -1997,6 +2017,7 @@ public sealed partial class MainForm : Form
         if (_netSection is not null) _netSection.Visible = !serial;
         if (_sideModeLabel is not null) _sideModeLabel.Text = serial ? "串口" : "网络";
         _sidePanel?.PerformLayout();
+        UpdateSidebarRail();
     }
 
     /// <summary>按模式禁用字段（规格：模式1 禁本地端口；模式2 禁远程IP/端口；模式3 全开）。</summary>
@@ -2095,10 +2116,11 @@ public sealed partial class MainForm : Form
         base.OnShown(e);
         ApplyMultiWidth();
         if (_bodyLayout is not null)
-            _bodyLayout.ColumnStyles[0].Width = SidebarWidth();
+            _bodyLayout.ColumnStyles[0].Width = _sideCollapsed ? RailWidth() : SidebarWidth();
         _sidePanel?.PerformLayout();
         UpdateComposerLayout();
         UpdateMinimumHeight();
+        ScheduleResponsiveRelayout();
         SetCueBanner(_sendBox, "在此输入要发送的数据");
         _lastSentSample = Interlocked.Read(ref _sentCount);
         _lastRecvSample = Interlocked.Read(ref _recvCount);
@@ -2394,6 +2416,7 @@ public sealed partial class MainForm : Form
         _sentStatus.Text = $"S:{Interlocked.Read(ref _sentCount)}";
         _recvStatus.Text = $"R:{Interlocked.Read(ref _recvCount)}";
         _openButton.Text = _port.IsOpen ? "关闭串口" : "打开串口";
+        UpdateSidebarRail();
         RefreshLogHeaderLayout();
     }
 
@@ -2718,6 +2741,7 @@ public sealed partial class MainForm : Form
             FontStyle = (int)_recvBox.Font.Style,
             FontColor = _recvBox.ForeColor.ToArgb(),
             ThemeLight = Theme.IsLight,
+            SideCollapsed = _sideUserCollapsed,
             Language = "C",
         };
         if (_hexSendBox.Checked) snap.HexText = _sendBox.Text;
@@ -2853,6 +2877,9 @@ public sealed partial class MainForm : Form
             _multiPanelWidth = _multiWidthCustom ? savedWidth : 0;
             _multiBtnWidth = snap.MultiButtonWidth > 0 ? snap.MultiButtonWidth : 120;
             ApplyLoadedPort(snap.PortValue);
+            _sideUserCollapsed = snap.SideCollapsed;
+            _sideManualOverride = false;
+            SetSidebarCollapsed(snap.SideCollapsed, persist: false, manual: false, automatic: false);
             ApplyWindowGeometry(snap);
         }
         finally

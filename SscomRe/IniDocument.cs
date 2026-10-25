@@ -93,6 +93,7 @@ public static class IniDocument
         Setting(sb, "窗口字体颜色", 1090, snap.FontColor.ToString(CultureInfo.InvariantCulture));
         Setting(sb, "窗口字体样式", 1091, snap.FontStyle.ToString(CultureInfo.InvariantCulture));
         Setting(sb, "主题(0=深色,1=浅色)", 1092, snap.ThemeLight ? "1" : "0");
+        Setting(sb, "连接栏折叠(0=展开,1=折叠)", 1093, snap.SideCollapsed ? "1" : "0");
         Setting(sb, "C:Chinese汉语, E:English", 1100, "C");
         sb.Append(";end\r\n");
         return sb.ToString();
@@ -285,6 +286,7 @@ public static class IniDocument
                     snap.FontStyle = fontStyle;
                 break;
             case 1092: snap.ThemeLight = IsOn(value); break;
+            case 1093: snap.SideCollapsed = IsOn(value); break;
             case 1100:
                 snap.Language = value;
                 break;
@@ -374,5 +376,7 @@ public sealed class IniSnapshot
     public int FontStyle { get; set; }
     /// <summary>N1092：0 深色、1 浅色；这是重写版新增键，原版没有。</summary>
     public bool ThemeLight { get; set; }
+    /// <summary>N1093：连接栏 0 展开、1 折叠；重写版新增键。</summary>
+    public bool SideCollapsed { get; set; }
     public string Language { get; set; } = "C";
 }

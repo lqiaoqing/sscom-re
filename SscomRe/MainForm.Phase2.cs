@@ -45,7 +45,22 @@ public sealed partial class MainForm
             row++;
         }
 
-        var head = new FlowLayoutPanel
+        int headerButton = Math.Max(30, Font.Height + 8);
+        var head = new TableLayoutPanel
+        {
+            ColumnCount = 2,
+            RowCount = 1,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Surface2,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        head.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        head.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, headerButton + 4));
+        head.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var headText = new FlowLayoutPanel
         {
             AutoSize = true,
             WrapContents = false,
@@ -54,7 +69,7 @@ public sealed partial class MainForm
             Margin = new Padding(0),
             Padding = new Padding(0),
         };
-        head.Controls.Add(new Label
+        headText.Controls.Add(new Label
         {
             Text = "连接",
             AutoSize = true,
@@ -69,7 +84,20 @@ public sealed partial class MainForm
             ForeColor = Theme.Muted,
             Margin = new Padding(0, 2, 0, 0),
         };
-        head.Controls.Add(_sideModeLabel);
+        headText.Controls.Add(_sideModeLabel);
+        var collapse = new ThemeButton
+        {
+            Text = "«",
+            Width = headerButton,
+            Height = headerButton,
+            Kind = ThemeButton.ButtonKind.Icon,
+            Anchor = AnchorStyles.Right,
+            Margin = new Padding(0),
+        };
+        collapse.Click += (_, _) => SetSidebarCollapsed(true, persist: true, manual: true, automatic: false);
+        _rowTip.SetToolTip(collapse, "收起连接栏");
+        head.Controls.Add(headText, 0, 0);
+        head.Controls.Add(collapse, 1, 0);
         Add(head, 7);
 
         Add(SideLabel("端口号"), 3);
@@ -120,7 +148,12 @@ public sealed partial class MainForm
             Margin = new Padding(0, 12, 0, 0),
         }, 0);
 
+        _sideContent = layout;
+        _railPanel = BuildRail();
         _sidePanel.Controls.Add(layout);
+        _sidePanel.Controls.Add(_railPanel);
+        _railPanel.Visible = _sideCollapsed;
+        layout.Visible = !_sideCollapsed;
         _sidePanel.Resize += (_, _) => FitSidebar(layout);
         _sidePanel.Layout += (_, _) => FitSidebar(layout);
         return _sidePanel;
@@ -128,10 +161,133 @@ public sealed partial class MainForm
 
     private void FitSidebar(Control layout)
     {
-        if (_sidePanel is null) return;
+        if (_sidePanel is null || _sideContent is null || !_sideContent.Visible) return;
         int scroll = _sidePanel.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
         int width = Math.Max(160, _sidePanel.ClientSize.Width - scroll);
         if (layout.Width != width) layout.Width = width;
+    }
+
+    private int RailWidth() => Math.Max(48, Theme.Scale(this, 52));
+
+    private int RailButtonHeight() => Math.Max(34, Font.Height + 10);
+
+    private Panel BuildRail()
+    {
+        var rail = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface2 };
+        var table = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Surface2,
+            Padding = new Padding(4, 8, 4, 6),
+            Margin = new Padding(0),
+        };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        int row = 0;
+        void Add(Control control, int gap = 6)
+        {
+            control.Dock = DockStyle.Top;
+            control.Margin = new Padding(0, 0, 0, gap);
+            table.RowCount = row + 1;
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            table.Controls.Add(control, 0, row);
+            row++;
+        }
+
+        _railExpand = new ThemeButton
+        {
+            Text = "»",
+            Height = RailButtonHeight(),
+            Kind = ThemeButton.ButtonKind.Icon,
+        };
+        _railExpand.Click += (_, _) => SetSidebarCollapsed(false, persist: true, manual: true, automatic: false);
+        _rowTip.SetToolTip(_railExpand, "展开连接栏");
+        Add(_railExpand, 8);
+
+        _railDot = new Label
+        {
+            Text = "●",
+            AutoSize = false,
+            Height = Math.Max(16, Font.Height - 6),
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Theme.Green,
+            BackColor = Color.Transparent,
+        };
+        Add(_railDot, 2);
+        _railModeLabel = new Label
+        {
+            Text = "串口",
+            AutoSize = false,
+            Height = Font.Height + 2,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Theme.Muted,
+            BackColor = Color.Transparent,
+        };
+        Add(_railModeLabel, 2);
+        _railPortLabel = new Label
+        {
+            Text = "COM1",
+            AutoSize = false,
+            Height = Font.Height + 2,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Theme.Text,
+            AutoEllipsis = true,
+            BackColor = Color.Transparent,
+        };
+        Add(_railPortLabel, 10);
+        _railOpen = new ThemeButton { Text = "开", Height = RailButtonHeight() };
+        _railOpen.Click += (_, _) => ToggleOpen();
+        Add(_railOpen, 0);
+
+        rail.Controls.Add(table);
+        return rail;
+    }
+
+    private void UpdateSidebarRail()
+    {
+        if (_railOpen is null) return;
+        bool serial = _netMode == NetMode.Serial;
+        bool connected = serial ? _port.IsOpen : _net.Ready;
+        _railDot.ForeColor = connected ? Theme.Green : Theme.Dim;
+        _railModeLabel.Text = serial ? "串口" : "网络";
+        string port = serial
+            ? (_port.IsOpen ? _port.OpenedPortName : ComPortService.NormalizePortName(_portCombo.Text))
+            : _portCombo.Text;
+        _railPortLabel.Text = port.Length > 0 ? port : "—";
+        _railModeLabel.ForeColor = Theme.Muted;
+        _railPortLabel.ForeColor = Theme.Text;
+        _railOpen.Visible = serial;
+        _railOpen.Text = _port.IsOpen ? "关" : "开";
+        _rowTip.SetToolTip(_railOpen, _port.IsOpen ? "关闭串口" : "打开串口");
+    }
+
+    private void SetSidebarCollapsed(bool collapsed, bool persist, bool manual, bool automatic)
+    {
+        if (_sidePanel is null) return;
+        _sideCollapsed = collapsed;
+        if (manual)
+        {
+            _sideManualOverride = true;
+            _sideAutoCollapsed = false;
+            _sideUserCollapsed = collapsed;
+        }
+        else if (automatic)
+        {
+            _sideAutoCollapsed = collapsed;
+        }
+        else
+        {
+            _sideAutoCollapsed = false;
+        }
+        if (_sideContent is not null) _sideContent.Visible = !collapsed;
+        if (_railPanel is not null) _railPanel.Visible = collapsed;
+        _sidePanel.AutoScroll = !collapsed;
+        if (_bodyLayout is not null)
+            _bodyLayout.ColumnStyles[0].Width = collapsed ? RailWidth() : SidebarWidth();
+        _sidePanel.PerformLayout();
+        _bodyLayout?.PerformLayout();
+        UpdateSidebarRail();
+        if (persist) AutoSave();
     }
 
     private TableLayoutPanel BuildSerialSection()

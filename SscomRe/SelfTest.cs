@@ -457,6 +457,7 @@ internal static class SelfTest
             snap.Data[198] = "第三页";
             snap.Delay[198] = "2500";
             snap.ThemeLight = true;
+            snap.SideCollapsed = true;
 
             string t1 = IniDocument.Save(snap);
             CheckText("ini 含HEX注释", t1.Contains(IniDocument.CommentHex) ? "yes" : "no", "yes");
@@ -467,6 +468,7 @@ internal static class SelfTest
             CheckText("ini 写N1100为C", t1.Contains("N1100=,C\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写N1058为1000", t1.Contains("N1058=,1000\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写浅色主题", t1.Contains("N1092=,1\r\n") ? "yes" : "no", "yes");
+            CheckText("ini 写连接栏折叠", t1.Contains("N1093=,1\r\n") ? "yes" : "no", "yes");
 
             var loaded = IniDocument.Load(t1);
             string t2 = IniDocument.Save(loaded);
@@ -500,6 +502,7 @@ internal static class SelfTest
             CheckText("ini 还原字体", $"{loaded.FontName},{loaded.FontSize},{loaded.FontStyle},{loaded.FontColor}",
                 "Consolas,16,5," + Color.FromArgb(255, 20, 30, 40).ToArgb().ToString());
             CheckText("ini 还原浅色主题", loaded.ThemeLight ? "yes" : "no", "yes");
+            CheckText("ini 还原连接栏折叠", loaded.SideCollapsed ? "yes" : "no", "yes");
             CheckText("ini 网络模式", loaded.PortValue, "3");
             CheckText("ini 自定义波特率", loaded.Baud, "250000");
             CheckText("ini 帧尾档", loaded.TailReserve.ToString(), "3");

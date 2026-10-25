@@ -1,7 +1,7 @@
 # 交接文档：SscomRe（SSCOM 5.13.1 的 C# 重写）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前状态（2026-10-23）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区与富文本日志已接入，`--selftest` 191/191 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前状态（2026-10-23）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区与富文本日志已接入，`--selftest` 193/193 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -53,7 +53,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   PortSettingsDialog.cs 自建「更多串口设置」对话框
   WindowPlacement.cs    N1082–N1085 窗口几何夹取
   InputNormalizer.cs    行内数字框归一化（光标规则）
-  SelfTest.cs           --selftest 用例（当前 191 项）
+  SelfTest.cs           --selftest 用例（当前 193 项）
 ```
 
 ---
@@ -73,11 +73,12 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 | M9 窗口几何/字体背景色/发布 | ✅ 已建；几何夹取/字体应用有自检 |
 | UI Phase 1 深/浅主题（换皮，不重排） | ✅ 已建；DWM 深/浅标题栏、自绘控件、暗色菜单/下拉/滚动条、自绘多条分页、N1092 记忆 |
 | UI Phase 2 三栏工作区 + 富文本日志 | ✅ 已建；左连接栏、中日志/composer、右多条抽屉、RX/TX/错误分色、搜索/暂停/复制、速率/缓冲 |
+| UI Phase 3A 左栏折叠 | ✅ 已建；窄图标 rail、手动/自动折叠、N1093 持久化 |
 
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `SscomRe.exe --selftest` → `pass=191 fail=0`
+- `SscomRe.exe --selftest` → `pass=193 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境无真实 COM 口，串口/网络的实机收发热路径仍需在目标硬件上复验
 
@@ -91,7 +92,7 @@ dotnet build -c Release
 # 输出固定为 SscomRe/bin/net48/SscomRe.exe（csproj 固定 OutputPath）
 
 cd bin/net48
-./SscomRe.exe --selftest          # 必须 pass=191 fail=0
+./SscomRe.exe --selftest          # 必须 pass=193 fail=0
 
 # 冒烟：跑 ≥5 秒，检查没崩
 rm -f crash.log
@@ -181,6 +182,8 @@ taskkill //IM SscomRe.exe //F
 
 - 根布局：工具栏 → 三栏主体（`_bodyLayout`：左 `_sidePanel` + 右 `_split`）→ 进度条 → 状态栏。`_split.Panel1` 是中心工作区（日志头 + 富文本日志 + composer），Panel2 是多条抽屉。
 - 左栏：`BuildSidebar`/`BuildSerialSection`/`BuildNetSection`；共用 `_portCombo`，串口/网络字段用 `_serialSection`/`_netSection` 显隐；`UpdateModePanels` 不再碰旧的三行数组。
+- 左栏折叠：`BuildRail` 生成窄 rail（展开 `»`、状态点、模式/端口缩写、打开/关闭）；`_sideContent` 与 `_railPanel` 二选一显示。`SetSidebarCollapsed(collapsed,persist,manual,automatic)` 写 `_bodyLayout` 列宽；手动操作持久化 N1093，`_sideUserCollapsed` 保存用户偏好（自动折叠不写）。`ScheduleResponsiveRelayout` 在宽 < `SidebarWidth()+720` 时自动折叠，变宽自动展开；`_sideManualOverride` 一旦手动操作，本次运行不再自动切换。轨道宽度 `RailWidth()`、rail 标签/按钮 `UpdateSidebarRail`。
+- N1093 与 N1092 一样是重写版新增 ini 键（0 展开、1 折叠），原版忽略。
 - composer：`BuildComposer` 使用 `_settingsRow1`/`_settingsRow2`/`_sendArea` 三个控件，`UpdateComposerGridRows` 写行高；`━` 按钮通过 `_composerPanel.Visible` 折叠整个 composer。
 - 接收框：`ThemeRichTextBox`（继承 RichTextBox），字段仍是 `_recvBox`；线程模型不变，所有富文本操作只在界面线程的 `DrainDisplay` 路径执行。
 - 分色：`LogFormatter.Parse` 把文本拆成 Timestamp/Rx/Tx/Error/Data/Hex；`AppendFormatted` 用 `SelectionColor/SelectionBackColor` 逐段追加。TX 行暖底、错误行红底，来源是 `Theme.TxWash/ErrorWash`。
@@ -260,13 +263,13 @@ taskkill //IM SscomRe.exe //F
 
 ## 9. 后续可选项
 
-按用户优先级从高到低：
+详细计划见 [`REWRITE-PLAN.md`](REWRITE-PLAN.md) 的 Phase 3 段。按用户优先级从高到低：
 
-1. 在真实串口/网口上复验三栏布局：接收分色、搜索/暂停、发送回显、发送文件、定时发送、TCP 服务端多连接、UDP。
-2. 高 DPI 更细的自适应（200% 窄屏下自动折叠左栏/抽屉）；本期只做了日志头响应式。
-3. 低频设置悬浮面板（接收设置/发送设置）和面板展开动效；当前设置仍在 composer 内联。
-4. 完全自绘标题栏（用户当前选择保留原生 DWM，不要擅自改）。
-5. 极高波特率下的日志追加性能压测；必要时改批量绘制。
+1. ✅ Phase 3A：左侧栏 rail 折叠、N1093、窄窗自动折叠。
+2. Phase 3B：接收/发送低频设置浮层，composer 只留常用项。
+3. Phase 3C：高波特率日志压测、短动效、toast 和 DPI 回归。
+4. 在真实串口/网口上复验三栏布局：接收分色、搜索/暂停、发送回显、发送文件、定时发送、TCP 服务端多连接、UDP。
+5. 完全自绘标题栏（用户当前选择保留原生 DWM，不要擅自改）。
 6. 规格「还不能当规则用的部分」里的烧写器、波形等——**用户已排除，不要做**。
 7. 若需要单文件分发，可在 csproj 增加 Costura/ILMerge 方案；当前分发 exe + config 即可，目标机只需 .NET Framework 4.8。
 
