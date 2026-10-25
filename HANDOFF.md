@@ -1,7 +1,7 @@
 # 交接文档：SscomRe（SSCOM 5.13.1 的 C# 重写）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前状态（2026-10-23）：**M1–M9 全部实现，UI Phase 1 深/浅双主题已接入，`--selftest` 185/185 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前状态（2026-10-23）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区与富文本日志已接入，`--selftest` 191/191 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -31,8 +31,13 @@ REWRITE-PLAN.md              里程碑 M1–M9 状态
 _analysis/                   逆向脚本与产物（见 §8，不含原程序）
 SscomRe/                     工程（.NET Framework 4.8 WinForms）
   Program.cs            入口；--selftest；全局异常→crash.log
-  MainForm.cs           主窗体（约 3000 行）：菜单、布局、收发编排、ini
-  Theme.cs              深色 token、DPI 尺寸、DWM、菜单/状态栏渲染、递归兜底
+  MainForm.cs           主窗体（约 3000 行）：菜单、收发编排、ini
+  MainForm.Phase2.cs    三栏工作区、连接栏、日志头、composer 布局
+  MainForm.Log.cs       日志分色追加、搜索/暂停/复制、速率/缓冲
+  LogFormatter.cs       日志文本 → 着色片段（纯逻辑）
+  ThemeRichTextBox.cs   接收日志富文本框（原生滚动条跟随主题）
+  Sparkline.cs          状态栏 RX 速率曲线
+  Theme.cs              主题 token、DPI 尺寸、DWM、菜单/状态栏渲染、递归兜底
   ThemeButton.cs        自绘按钮与按文字映射的矢量图标
   ThemeCheckBox.cs      自绘复选框（琥珀勾选 + 暖色高亮）
   ThemeComboBox.cs      自绘下拉框（覆盖原生浅色按钮、隐藏列表滚动条）
@@ -48,7 +53,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   PortSettingsDialog.cs 自建「更多串口设置」对话框
   WindowPlacement.cs    N1082–N1085 窗口几何夹取
   InputNormalizer.cs    行内数字框归一化（光标规则）
-  SelfTest.cs           --selftest 用例（当前 185 项）
+  SelfTest.cs           --selftest 用例（当前 191 项）
 ```
 
 ---
@@ -67,11 +72,12 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 | M8 sscom51.ini 保存/导入 | ✅ 已建；含往返与旧格式兼容自检 |
 | M9 窗口几何/字体背景色/发布 | ✅ 已建；几何夹取/字体应用有自检 |
 | UI Phase 1 深/浅主题（换皮，不重排） | ✅ 已建；DWM 深/浅标题栏、自绘控件、暗色菜单/下拉/滚动条、自绘多条分页、N1092 记忆 |
+| UI Phase 2 三栏工作区 + 富文本日志 | ✅ 已建；左连接栏、中日志/composer、右多条抽屉、RX/TX/错误分色、搜索/暂停/复制、速率/缓冲 |
 
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `SscomRe.exe --selftest` → `pass=185 fail=0`
+- `SscomRe.exe --selftest` → `pass=191 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境无真实 COM 口，串口/网络的实机收发热路径仍需在目标硬件上复验
 
@@ -85,7 +91,7 @@ dotnet build -c Release
 # 输出固定为 SscomRe/bin/net48/SscomRe.exe（csproj 固定 OutputPath）
 
 cd bin/net48
-./SscomRe.exe --selftest          # 必须 pass=185 fail=0
+./SscomRe.exe --selftest          # 必须 pass=191 fail=0
 
 # 冒烟：跑 ≥5 秒，检查没崩
 rm -f crash.log
@@ -135,20 +141,20 @@ taskkill //IM SscomRe.exe //F
 - TCP 客户端连接超时 5 秒（实现补充）；UDP 收到数据会把发送方 IP 回填「远程IP」。
 - 网络模式关串口；模式切换停两个发送定时器并取消勾选。
 
-### 5.5 布局 / DPI / 性能（2026-10-23 按原版重排，别改回去）
+### 5.5 布局 / DPI / 性能（Phase 2 三栏，别改回旧底栏）
 
 程序是 PerMonitorV2，但窗体没有 `AutoScaleDimensions`，布局值是物理像素，而字体按当前 DPI 渲染。所有随窗口伸缩的行都必须按实际宽度/内容计算，不要写死总宽度。
 
-- 底部是 2 列 4 行网格（`_bottomGrid`）：左列行 0 端口号、行 1 打开/刷新/更多串口设置、行 2 RTS/DTR/波特率（网络模式为远程/本地/连接断开）；右列行 0 选项、行 1 时间戳/超时/帧尾/校验、行 2–3 发送框+发送。左右行由同一个网格行高对齐。
-- 工具栏：左 清除窗口/打开文件 + 路径框（`WrapRowPanel.StretchControl` 填满中段）+ 右 发送文件/停止/清发送区/最前/保存参数/扩展/━。
-- 设置里的“HEX发送/定时发送/加回车换行”用 `MakeGroup` 成组，窄窗时整组折行；不要给需要折行的 `FlowLayoutPanel` 设 `AutoSize=true`。
-- `WrapRowPanel`：宽度固定为父宽、按 `GetPreferredSize(width)` 自动增高、按视觉行垂直居中；`MarkRightGroup`/`AlignRightGroup` 用于右侧组；`StretchControl` 用于路径框填充。
-- 左栏宽度由当前模式三行的实际内容测量（`UpdateLeftColumnWidth`）；`UpdateBottomGridRows` 把两行选项的实际高度写入网格行高；`BottomContentHeight` 计算底栏总高。不要用网格自身高度反推根行高（会形成布局循环）。
-- 窗口最小尺寸基准 820×560；`UpdateMinimumHeight()` 按当前折行高度保证底栏和状态栏不被挤出窗口；`ScheduleResponsiveRelayout()` 在缩放后延迟终排。
-- 多条字符串 297 行不用 TableLayoutPanel：`MultiRowsPanel` 自绘布局（固定行高/列宽，一次定位），分 3 页。行按钮调宽只改 `SendColumnWidth` 后 `PerformLayout()`。
-- 首次展开前 `_prewarmTimer` 在 OnShown 后分批创建多面板句柄（每 20ms 8 个）；改回 TableLayoutPanel 会回到秒级展开。
-- 接收框 `WordWrap = true`、`ScrollBars.Vertical`；追加走 `_displayTimer`（30ms 合并）；在底部时跟随，向上翻看历史时保持滚动/光标。
-- 高 DPI：物理像素布局 + 放大字体在 200% 缩放下会把底栏撑得很大，接收区变窄；自检已按 `DeviceDpi` 缩放测试窗口，但界面本身没有做完整的 DPI 自适应布局。改动布局时在 100% 和 200% 下都要看。
+- 根布局 4 行：工具栏 / 三栏主体（`_bodyLayout` = 左 `_sidePanel` + 右 `_split`）/ 进度条 / 状态栏。旧底部 2×4 网格、`_bottomGrid`、`_serialRows`/`_netRows` 已删除，不要再加回来。
+- 左栏：竖排连接栏，`SidebarWidth() = max(240, Theme.Scale(this,280))`；串口和网络字段分别是 `_serialSection`/`_netSection`，由 `UpdateModePanels` 显隐；端口/协议统一由 `_portCombo` 选。
+- 中心：`_split.Panel1` 内是日志头 + 富文本日志 + composer；`_split.Panel2` 是多条抽屉。默认抽屉宽约 340 逻辑像素，用户拖动后记录宽；N1086 旧值 480–580 仍按旧固定宽处理。
+- 工具栏：打开文件 + 路径框（`WrapRowPanel.StretchControl` 填满中段）+ 右 发送文件/停止/清发送区/最前/保存参数/扩展/━；清除窗口和保存数据移到日志头。
+- composer：`_settingsRow1`（HEX显示/接收落文件/HEX发送/定时/加回车）+ `_settingsRow2`（时间戳/超时/帧首/帧尾/校验/CRC）+ `_sendArea`；`UpdateComposerGridRows` 写三行绝对高度，`ComposerHeight` 供中心行高和 `UpdateMinimumHeight` 用。`━` 通过隐藏 `_composerPanel` 折叠 composer。
+- 日志头：`LogBarHeight = max(44, Theme.Scale(this,44))`；标题/副标题固定高度 + `RowFlowPanel` 垂直居中；搜索/暂停/清除/保存放在右侧 `RowFlowPanel`，搜索框宽度随 DPI 缩放。日志头的 TableLayoutPanel 必须有显式 Percent 行，否则默认 100px 会压住日志。
+- `WrapRowPanel`：宽度固定为父宽、按 `GetPreferredSize(width)` 自动增高、按视觉行垂直居中；`MarkRightGroup`/`AlignRightGroup` 用于右侧组；`StretchControl` 用于路径框填充。设置里的“HEX发送/定时发送/加回车换行”仍用 `MakeGroup` 成组折行。
+- 窗口最小尺寸基准 820×560；`UpdateMinimumHeight()` 用 `ComposerHeight` 保证日志/发送区/状态栏不被挤出；`ScheduleResponsiveRelayout()` 在缩放后延迟终排并更新侧栏宽度/composer 行高/日志头响应式。
+- 多条字符串 297 行不用 TableLayoutPanel：`MultiRowsPanel` 自绘布局（固定行高/列宽，一次定位），分 3 页；首次展开前 `_prewarmTimer` 在 OnShown 后分批创建句柄（每 20ms 8 个）。
+- 高 DPI：200% 窄屏三栏会拥挤；`UpdateLogHeaderResponsive` 在中心宽度 <620 隐藏搜索框、<420 隐藏副标题。改动布局时在 100% 和 200% 下都要看。
 
 ### 5.6 深/浅主题 / 自绘控件（Phase 1）
 
@@ -168,9 +174,23 @@ taskkill //IM SscomRe.exe //F
 - 复选框：`ThemeCheckBox` 勾选用琥珀色，`Highlighted` 控制暖色标签底；`StatusTick` 的 `Highlight` 只改这个属性，不要再设 `BackColor=Yellow`。
 - 文本框：`ThemeTextBox` 提供 `PlaceholderText`（路径框“未选择文件”），并在句柄创建时尝试 `SetWindowTheme(..., "DarkMode_Explorer")` 让原生滚动条变暗。
 - 多条字符串 3 页不再用 `TabControl`（原生页框在深色下始终有浅色边），改为 `pageHost` + `pageBar` 自绘分段按钮；`_multiPages`/`_multiTabs` 管理显隐。自检按“第1/2/3页”按钮计数，不按 `TabPage`。
-- 底栏两行设置区的高度额外 +4px（`UpdateBottomGridRows`/`BottomContentHeight`），给自绘下拉框留 Margin。
-- 接收框仍是普通 `TextBox`，日志是单色；要 RX/TX 分色需要换成 `RichTextBox` 并重做追加/截断/保存/滚动（Phase 2，不要偷偷改）。
+- 发送区的两行选项高度额外 +4px（`UpdateComposerGridRows`），给自绘下拉框留 Margin。
 - 禁止在深色控件上再用 `SystemColors.Control/Window/WindowText` 或 `Color.White/Yellow`；所有颜色走 `Theme` token。
+
+### 5.7 Phase 2 工作区 / 富文本日志
+
+- 根布局：工具栏 → 三栏主体（`_bodyLayout`：左 `_sidePanel` + 右 `_split`）→ 进度条 → 状态栏。`_split.Panel1` 是中心工作区（日志头 + 富文本日志 + composer），Panel2 是多条抽屉。
+- 左栏：`BuildSidebar`/`BuildSerialSection`/`BuildNetSection`；共用 `_portCombo`，串口/网络字段用 `_serialSection`/`_netSection` 显隐；`UpdateModePanels` 不再碰旧的三行数组。
+- composer：`BuildComposer` 使用 `_settingsRow1`/`_settingsRow2`/`_sendArea` 三个控件，`UpdateComposerGridRows` 写行高；`━` 按钮通过 `_composerPanel.Visible` 折叠整个 composer。
+- 接收框：`ThemeRichTextBox`（继承 RichTextBox），字段仍是 `_recvBox`；线程模型不变，所有富文本操作只在界面线程的 `DrainDisplay` 路径执行。
+- 分色：`LogFormatter.Parse` 把文本拆成 Timestamp/Rx/Tx/Error/Data/Hex；`AppendFormatted` 用 `SelectionColor/SelectionBackColor` 逐段追加。TX 行暖底、错误行红底，来源是 `Theme.TxWash/ErrorWash`。
+- 重画：主题/字体/颜色变化用 `RenderLogAll()`，它基于**当前可见文本**重解析，因此发送回显和终端本地输入也会保留；切换 HEX/文本显示用 `RenderLogBuffer()`，基于 `_receive.HexText/TextAccum`。不要用 `_receive` 缓冲去重画主题，否则会丢发送回显。
+- 滚动：`_autoFollow` 为真且原来在底部时跟随；暂停时保持原选择/滚动位置。`RecvAtBottom`/`EM_GETSCROLLPOS`/`EM_SETSCROLLPOS` 兼容 RichTextBox。
+- 搜索：`_searchBox` + `SearchNext(forward)` + `_recvBox.Find`；当前匹配用 `Theme.SearchHighlight` 作为 SelectionBackColor，下一次搜索/重画前清理。
+- 复制：富文本框右键菜单有“复制/复制纯数据（去掉时间戳和收/发标记）/全选/清除窗口”；`LogFormatter.StripMeta` 是纯逻辑，已有自检。
+- 速率：`_rateTimer` 每 500ms 用 S/R 计数差算 B/s，`Sparkline` 画最近 24 个 RX 样本；状态栏另有 RX/TX 文本速率和缓冲占用。`OnMainFormClosing` 必须停表。
+- 窄窗：`UpdateLogHeaderResponsive` 在中心宽度 <620 时隐藏搜索框，<420 时隐藏日志副标题；右抽屉仍由用户手动展开。
+- 删除旧底栏后不要再把 `_settingsRow` 放回 `_rootLayout`；composer 只属于中心工作区。
 
 ---
 
@@ -197,6 +217,11 @@ taskkill //IM SscomRe.exe //F
 | 自绘按钮和原生下拉框比行高多 2–4px → 200% DPI 下被行裁切 | 按钮高度用 `Font.Height+12`；底栏设置行额外 +4px |
 | `Theme.MonoFont` 返回共享 Font → `ApplyRecvFont` 释放旧字体时影响发送框 | 每次返回新 Font 实例，不共享 |
 | 运行时只改 `Theme.Current` 不重绘 → 控件还是旧色 | 必须走 `ApplyTheme` → `Theme.ApplyTheme`（含颜色映射和原生控件主题刷新） |
+| 接收框从 TextBox 换成 RichTextBox 后自检仍按 TextBox 找 → “找到接收框”失败 | 自检 UI 用例按 `RichTextBox` 找接收框；单行发送框仍是 TextBox |
+| 主题/字体变化用 `_receive` 缓冲重画 → 发送回显和本地输入丢失 | 用 `RenderLogAll()`（当前可见文本）；只有切 HEX/文本显示用 `RenderLogBuffer()` |
+| 日志头的 TableLayoutPanel 没有显式 RowStyle → 子控件按默认 100px 排，标题压到日志上 | 日志头必须加 `RowStyles.Add(Percent 100)`，标签固定高度交给 RowFlowPanel 居中 |
+| 新状态栏速率条用独立 Timer，但 sleep 阻塞 UI 线程时不自增 | 真机正常运行；测试/截图时用 `Application.DoEvents` 泵消息，或直接调用 `RateTick` |
+| 搜索高亮用 SelectionBackColor，重画/下一次搜索前必须清掉 | `ClearSearchHighlight` 在 `RenderLogFromText` 和下一次 `SearchNext` 开头调用 |
 | 浅色主题沿用 `on=1` 的 DWM 属性 → 标题栏仍是深色 | `ApplyChrome` 按 `Current.IsDark` 写 0/1；切换时重设 |
 | 浅色主题下原生滚动条仍是深色 | `TryDarkNative` 在浅色传 `null` 恢复系统主题，并由 `RefreshNative` 遍历已有句柄 |
 | 状态栏发送色/校验区底色写死深色 RGB → 浅色下看不清 | 用 `Theme.StatusSend`、`Theme.StatusBackground`、`Theme.VerifyField` |
@@ -212,10 +237,10 @@ taskkill //IM SscomRe.exe //F
 - 校验模式 7（ADD16）的字节序按规格标为推断：低字节在前。
 - 打开文件预览用原字节直接按 Latin-1 式字符累积文本，再经 `ReceiveDisplay.SetPreviewBuffers` 替换预览缓冲；原始接收缓冲和接收计数不动。
 - 网络服务端本地端口非法时选择“提示后不启动”（规格此处原程序响应未细读）。
-- Phase 1 主题只换皮：接收日志仍是普通 `TextBox`（单色），RX/TX 分色等富文本效果留给 Phase 2。
-- 标题栏用 DWM 深/浅原生方案，完全自绘标题栏留到 Phase 2；浅色模式下系统文件/字体/颜色对话框观感正常，深色模式下这些原生对话框仍是浅色。
-- 打开/保存文件、字体、颜色、MessageBox 是系统原生浅色对话框，未做深色包装。
-- 200% DPI + 窄屏（如 1440×900）下底栏会换行并超出窗口；设计窗口宽度约 2800 物理像素（或 100%–150% 缩放）时正常。
+- 标题栏继续用 DWM 深/浅原生方案（用户确认），完全自绘标题栏不在本期；浅色模式下系统文件/字体/颜色对话框观感正常，深色模式下这些原生对话框仍是浅色。
+- 接收/发送设置目前仍在 composer 的两行里直接展示，没有做悬浮设置面板；折叠动画也未加入。
+- 200% DPI + 窄屏（如 1440×900）下三栏会拥挤；日志头会自动收起搜索框/副标题，推荐 100%–150% 或宽度足够的窗口。
+- 富文本日志按段设置 SelectionColor/SelectionBackColor；极高波特率下若出现重绘瓶颈，优先把追加改成批量/自定义绘制，不要退回单色 TextBox。
 
 ---
 
@@ -237,11 +262,11 @@ taskkill //IM SscomRe.exe //F
 
 按用户优先级从高到低：
 
-1. **UI Phase 2**：左侧连接/会话栏 + 主接收区 + 右侧多条发送抽屉的布局重排（视觉稿方向已确认）。
-2. 接收日志富文本化（`RichTextBox`，RX 青绿 / TX 琥珀），同时保持 30ms 合并刷新、截断重画、保存/打开文件行为。
-3. 完全自绘标题栏（保留拖动/吸附/最大化），或继续用原生 DWM 深色。
-4. 在真实串口/网口上复验：打开/关闭、DTR/RTS、发送文件、定时发送、TCP 服务端多连接、UDP。
-5. 高 DPI 布局自适应（200% 缩放下底栏过高）；目前只保证 100%–150% 或宽窗口可用。
+1. 在真实串口/网口上复验三栏布局：接收分色、搜索/暂停、发送回显、发送文件、定时发送、TCP 服务端多连接、UDP。
+2. 高 DPI 更细的自适应（200% 窄屏下自动折叠左栏/抽屉）；本期只做了日志头响应式。
+3. 低频设置悬浮面板（接收设置/发送设置）和面板展开动效；当前设置仍在 composer 内联。
+4. 完全自绘标题栏（用户当前选择保留原生 DWM，不要擅自改）。
+5. 极高波特率下的日志追加性能压测；必要时改批量绘制。
 6. 规格「还不能当规则用的部分」里的烧写器、波形等——**用户已排除，不要做**。
 7. 若需要单文件分发，可在 csproj 增加 Costura/ILMerge 方案；当前分发 exe + config 即可，目标机只需 .NET Framework 4.8。
 

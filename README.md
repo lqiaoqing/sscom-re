@@ -3,7 +3,7 @@
 按逆向整理出的行为规格，用 **C# WinForms / .NET Framework 4.8** 重写 `sscom5.13.1.exe`（Delphi/VCL 串口网络调试工具）的日常收发功能。
 
 - 行为唯一依据：[sscom5.13.1-rewrite-spec.md](sscom5.13.1-rewrite-spec.md)
-- 当前状态：M1–M9 全部实现，Phase 1 深/浅双主题已接入；`--selftest` 185/185 通过
+- 当前状态：M1–M9 全部实现；Phase 1 深/浅双主题、Phase 2 三栏工作区与富文本日志已接入；`--selftest` 191/191 通过
 - 目标系统：Windows 10/11（自带 .NET Framework 4.8）
 - 原版程序、解包镜像和反编译源码**不在本仓库中**，详见 [_analysis/README.md](_analysis/README.md)
 
@@ -69,6 +69,15 @@
 | 强调/连接 | `#2FC9B9` | `#0B8A7E` |
 | 已启用/发送 | `#F0B45A` | `#E0A340` |
 
+### 工作区（Phase 2）
+
+- 三栏布局：左侧连接栏（端口/波特率/RTS/DTR/网络字段）、中间日志与发送区、右侧可折叠多条字符串抽屉
+- 接收日志改为富文本：时间戳灰、RX 青绿、TX 琥珀、错误红、HEX 暗青；TX 行带暖色底、错误行带红色底
+- 日志搜索（Enter / Shift+Enter 前后查找）、暂停跟随、右键复制/复制纯数据/全选/清除
+- 状态栏显示 RX/TX 实时速率、RX sparkline 和缓冲占用
+- 发送区仍在底部，包含 HEX 显示/发送、加时间戳/回车、定时发送、帧首/帧尾/校验等全部原控件
+- 标题栏保留原生 DWM 深/浅方案；菜单、工具栏、连接栏和抽屉使用现有主题 token
+
 ### 参数与界面
 
 - 保存参数 / 导入 ini：兼容原版 `sscom51.ini` 的键位与转义（`,`/CR/LF → `0x02`/`0x03`/`0x04`），支持三页多条字符串
@@ -113,7 +122,7 @@ cd SscomRe/bin/net48
 ./SscomRe.exe --selftest
 ```
 
-- 当前结果：`SELFTEST pass=185 fail=0`
+- 当前结果：`SELFTEST pass=191 fail=0`
 - 覆盖组包/转义、7 种校验、接收显示与截断、多条发送状态机、ini 往返、终端按键、窗口几何、主窗体布局等
 - 自检会临时创建主窗体并触发自动保存；开始前会备份现有 `sscom51.ini`，结束后原样恢复（没有则删除）
 - 布局检查按 `DeviceDpi` 缩放测试窗口，100%–200% 缩放下都可复现
@@ -141,7 +150,12 @@ _analysis/                    逆向分析脚本、DFM/Ghidra 产物（不含原
 SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
   Program.cs                  入口；--selftest；全局异常写 crash.log
   MainForm.cs                 主窗体、菜单、收发编排、ini 读写
+  MainForm.Phase2.cs          三栏工作区、连接栏、日志头和发送区布局
+  MainForm.Log.cs             分色追加、搜索/暂停/复制、速率与缓冲
+  LogFormatter.cs             日志文本 → 着色片段（纯逻辑）
   Theme.cs                    主题 token、DWM、菜单/状态栏渲染
+  ThemeRichTextBox.cs         接收日志富文本框
+  Sparkline.cs                状态栏 RX 速率曲线
   ThemeButton.cs              自绘按钮与矢量图标
   ThemeCheckBox.cs            自绘复选框（琥珀勾选）
   ThemeComboBox.cs            自绘下拉框（覆盖原生浅色按钮/滚动条）
@@ -170,9 +184,10 @@ SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
 - `N1058`（多条发送间隔）固定写 `1000`，读入时忽略（原程序用隐藏中转框，重写无此控件）
 - `N1080` 的 `1` 和 `2` 都映射为 TCPClient（照规格原文的怪癖）
 - 界面按物理像素布局、字体按 DPI 渲染；高 DPI（如 200%）下底栏占比明显变大，建议最大化窗口或降低显示缩放
-- Phase 1 只换皮，未重排布局；接收日志仍是普通 `TextBox`，整段单色，RX/TX 分色需要 Phase 2 的富文本日志控件
-- 标题栏使用原生 DWM 深色方案（保证拖动/吸附/最大化稳定）；完全自绘标题栏留到 Phase 2
-- 打开/保存文件、字体、颜色和 MessageBox 使用系统原生对话框，仍是系统浅色
+- 标题栏使用原生 DWM 深/浅方案（保证拖动/吸附/最大化稳定）；完全自绘标题栏不在本期
+- 接收设置/发送设置目前以底部两行选项直接展示，尚未做成悬浮设置面板；折叠动画也未加入
+- 高 DPI 窄屏（如 1440×900 @200%）下三栏会拥挤，日志搜索框和副标题会自动收起；推荐 100%–150% 或宽窗口
+- 打开/保存文件、字体、颜色和 MessageBox 使用系统原生对话框
 - 自检不依赖真实串口/网络硬件；实机串口收发仍需在目标机器上复验
 
 ## 故障排查

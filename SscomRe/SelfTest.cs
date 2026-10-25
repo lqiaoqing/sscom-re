@@ -40,6 +40,16 @@ internal static class SelfTest
         CheckText("文件预览 HEX", preview.Hex, "D6D00041");
         CheckText("文件预览 GBK 文本", preview.Text, "中A");
 
+        // —— 接收日志分色 ——
+        var logLines = LogFormatter.Parse(
+            "[22:31:05.128]收←◆AT+VERSION?\n[22:31:06.002]发→◇AT+BAUD?\n帧校验失败：期望 37 4B", false);
+        CheckText("日志行数", logLines.Count.ToString(), "3");
+        CheckText("日志 RX 片段", $"{logLines[0].Spans[0].Kind},{logLines[0].Spans[1].Kind}", "Timestamp,Rx");
+        CheckText("日志 TX 行", logLines[1].Tx ? "yes" : "no", "yes");
+        CheckText("日志错误行", logLines[2].Error ? "yes" : "no", "yes");
+        CheckText("日志去元数据", LogFormatter.StripMeta("[22:31:05.128]收←◆AT\nOK"), "AT\nOK");
+        CheckText("日志 HEX 片段", LogFormatter.Parse("D6 D0", true)[0].Spans[0].Kind.ToString(), "Hex");
+
         // —— 校验算法（1..7 的已知向量，"123456789"） ——
         var ascii = Encoding.ASCII.GetBytes("123456789");
         Check("mode1 ModbusCRC16", Checksums.Compute(ascii, 1, 0, 0), "37 4B");
@@ -539,13 +549,13 @@ internal static class SelfTest
             form.Size = new Size(1200 * scale / 96, 720 * scale / 96);
             Application.DoEvents();
             TextBox? send = null;
-            TextBox? recv = null;
+            RichTextBox? recv = null;
             ComboBox? verify = null;
             CheckBox? stamp = null;
             foreach (var c in AllControls(form))
             {
                 if (c is TextBox tb && tb.Multiline && tb.Text == "abcdefg") send = tb;
-                else if (c is TextBox tb2 && tb2.Multiline) recv = tb2;
+                if (c is RichTextBox rich) recv = rich;
                 if (c is ComboBox box && box.Items.Contains("ModbusCRC16")) verify = box;
                 if (c is CheckBox cb && cb.Text == "加时间戳和分包显示") stamp = cb;
             }

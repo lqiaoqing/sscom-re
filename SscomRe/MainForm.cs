@@ -8,7 +8,7 @@ namespace SscomRe;
 /// 主窗体：串口/网络收发、多条字符串、终端仿真、ini 参数与界面编排。
 /// 布局与文案按规格“界面结构与控件对照 / 状态栏 / 最前、扩展、━”设计。
 /// </summary>
-public sealed class MainForm : Form
+public sealed partial class MainForm : Form
 {
     private readonly ComPortService _port = new();
     private readonly ReceiveDisplay _receive = new();
@@ -20,6 +20,19 @@ public sealed class MainForm : Form
     // 显示缓冲上限（规格：默认 1000000，菜单可改 200K/500K/1M/2M/5M）
     private int _displayLimit = 1_000_000;
     private readonly List<ToolStripMenuItem> _limitItems = new();
+    private ThemeTextBox _searchBox = null!;
+    private ThemeButton _pauseButton = null!;
+    private bool _autoFollow = true;
+    private int _searchStart = -1;
+    private int _searchLength;
+    private ToolStripStatusLabel _rxRateLabel = null!;
+    private ToolStripStatusLabel _txRateLabel = null!;
+    private ToolStripStatusLabel _bufferLabel = null!;
+    private Sparkline _sparkline = null!;
+    private readonly System.Windows.Forms.Timer _rateTimer = new() { Interval = 500 };
+    private long _lastSentSample;
+    private long _lastRecvSample;
+    private readonly List<float> _rxRateSamples = new();
 
     // 控件
     private ComboBox _portCombo = null!;
@@ -28,7 +41,7 @@ public sealed class MainForm : Form
     private CheckBox _rtsBox = null!;
     private CheckBox _dtrBox = null!;
     private Button _moreSettingsButton = null!;
-    private TextBox _recvBox = null!;
+    private RichTextBox _recvBox = null!;
     private TextBox _sendBox = null!;
     private Button _sendButton = null!;
     private CheckBox _hexDisplayBox = null!;
@@ -108,8 +121,6 @@ public sealed class MainForm : Form
 
     // —— M6：网络（TCP 客户端 / 服务端 / UDP）——
     private readonly NetworkService _net = new();
-    private FlowLayoutPanel[] _serialRows = [];           // 左侧串口栏三行
-    private FlowLayoutPanel[] _netRows = [];              // 左侧网络栏三行
     private TextBox _remoteIpBox = null!;
     private TextBox _remotePortBox = null!;
     private TextBox _localPortBox = null!;
@@ -137,8 +148,18 @@ public sealed class MainForm : Form
     private int _multiPanelWidth;                       // N1086。0 表示还没拖过，按窗口大约四分之一
     private bool _multiWidthCustom;
     private bool _userMovingSplitter;
-    private TableLayoutPanel _bottomGrid = null!;
     private TableLayoutPanel _rootLayout = null!;
+    private TableLayoutPanel _bodyLayout = null!;
+    private Panel _sidePanel = null!;
+    private TableLayoutPanel _serialSection = null!;
+    private TableLayoutPanel _netSection = null!;
+    private Label _sideModeLabel = null!;
+    private Label _lineInfoLabel = null!;
+    private Label _logTitleLabel = null!;
+    private Label _logSubLabel = null!;
+    private Panel _composerPanel = null!;
+    private TableLayoutPanel _composerGrid = null!;
+    private TableLayoutPanel _centerLayout = null!;
     private string _ascSendText = "abcdefg";
     private string _hexSendText = "12 FF 00 30";
 
@@ -156,14 +177,15 @@ public sealed class MainForm : Form
         Theme.SetLight(IniDocument.ReadThemePreference(IniPath()));
 
         BuildUi();
+        _rateTimer.Tick += (_, _) => RateTick();
         WireEvents();
         RefreshRecvSnapshot();
         RefreshPortList();
         LoadConfig();
-        UpdateLeftColumnWidth();
         UpdateStatus();
         Theme.ApplyWindow(this);
         Theme.StyleRecursive(this);
+        RefreshLogHeaderLayout();
     }
 
     // ———————————————————————— UI 构建 ————————————————————————
@@ -175,37 +197,50 @@ public sealed class MainForm : Form
         var menu = BuildMenu();
         var toolBar = BuildToolBar();
         _toolBar = toolBar;
-        var bottom = BuildBottomBand();
-        var center = BuildCenter();
+        var side = BuildSidebar();
+        var center = BuildCenterPhase2();
         var status = BuildStatusBar();
+
+        _bodyLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = Theme.Canvas,
+        };
+        _bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SidebarWidth()));
+        _bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        side.Dock = DockStyle.Fill;
+        center.Dock = DockStyle.Fill;
+        _bodyLayout.Controls.Add(side, 0, 0);
+        _bodyLayout.Controls.Add(center, 1, 0);
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 4,
             Margin = new Padding(0),
             Padding = new Padding(0),
             BackColor = Theme.Canvas,
         };
         _rootLayout = root;
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // 接收区
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // 进度条
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight())); // 工具栏，可换行
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, BottomBandHeight())); // 端口 + 选项 + 发送框
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // 状态栏
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight())); // 工具栏
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));           // 三栏主体
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));               // 进度条
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));               // 状态栏
 
         _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 8, Maximum = 100, Visible = false, Margin = new Padding(0), BackColor = Theme.Surface2 };
-        root.Controls.Add(center, 0, 0);
-        root.Controls.Add(_progressBar, 0, 1);
-        root.Controls.Add(toolBar, 0, 2);
-        root.Controls.Add(bottom, 0, 3);
-        root.Controls.Add(status, 0, 4);
+        root.Controls.Add(toolBar, 0, 0);
+        root.Controls.Add(_bodyLayout, 0, 1);
+        root.Controls.Add(_progressBar, 0, 2);
+        root.Controls.Add(status, 0, 3);
 
         toolBar.SizeChanged += (_, _) => { UpdateToolbarRowHeight(toolBar); ScheduleResponsiveRelayout(); };
         UpdateToolbarRowHeight(toolBar);
-        UpdateBottomBandHeight();
         SizeChanged += (_, _) => ScheduleResponsiveRelayout();
 
         Controls.Add(root);
@@ -216,18 +251,17 @@ public sealed class MainForm : Form
 
     private int LineHeight() => Math.Max(28, Font.Height + 14);
 
-    /// <summary>底部控制区：左侧三行端口，右侧两行选项加三行发送框。设置行换行时整体高度会增加。</summary>
-    private int BottomBandHeight() => LineHeight() * 5 + 4;
+    private int SidebarWidth() => Math.Max(240, Theme.Scale(this, 280));
 
     private void UpdateToolbarRowHeight(Control toolBar)
     {
         if (_rootLayout is null) return;
         int h = Math.Max(LineHeight(), toolBar.Height);
-        RowStyle style = _rootLayout.RowStyles[2];
+        RowStyle style = _rootLayout.RowStyles[0];
         if (Math.Abs(style.Height - h) > 0.5f) style.Height = h;
     }
 
-    /// <summary>折行/缩放后 Toolbar、设置区和根行高可能在同一轮布局里彼此错过，延迟一次终排。</summary>
+    /// <summary>折行/缩放后工具栏、侧栏和发送区可能在同一轮布局里彼此错过，延迟一次终排。</summary>
     private void ScheduleResponsiveRelayout()
     {
         if (_relayoutScheduled || !IsHandleCreated) return;
@@ -235,31 +269,36 @@ public sealed class MainForm : Form
         BeginInvoke(new Action(() =>
         {
             _relayoutScheduled = false;
-            if (_rootLayout is null || _toolBar is null || _bottomGrid is null) return;
+            if (_rootLayout is null || _toolBar is null || _sidePanel is null) return;
             int toolbarHeight = Math.Max(LineHeight(), _toolBar.Height);
-            int bottomHeight = BottomContentHeight() + 4;
-            RowStyle toolbarRow = _rootLayout.RowStyles[2];
+            RowStyle toolbarRow = _rootLayout.RowStyles[0];
             if (Math.Abs(toolbarRow.Height - toolbarHeight) > 0.5f) toolbarRow.Height = toolbarHeight;
-            RowStyle bottomRow = _rootLayout.RowStyles[3];
-            if (Math.Abs(bottomRow.Height - bottomHeight) > 0.5f) bottomRow.Height = bottomHeight;
+            if (_bodyLayout is not null)
+            {
+                float wanted = SidebarWidth();
+                if (Math.Abs(_bodyLayout.ColumnStyles[0].Width - wanted) > 0.5f)
+                    _bodyLayout.ColumnStyles[0].Width = wanted;
+            }
+            UpdateComposerLayout();
             _rootLayout.PerformLayout();
+            _bodyLayout?.PerformLayout();
             UpdateMinimumHeight();
         }));
     }
 
     private void UpdateMinimumHeight()
     {
-        if (_updatingMin || !IsHandleCreated || _toolBar is null || _bottomGrid is null) return;
+        if (_updatingMin || !IsHandleCreated || _toolBar is null || _sidePanel is null) return;
         _updatingMin = true;
         try
         {
             int required = (MainMenuStrip?.Height ?? 0)
                            + _toolBar.Height
-                           + BottomContentHeight() + 4
+                           + ComposerHeight()
                            + (_statusStrip?.Height ?? 0)
-                           + 130;
+                           + 220;                       // 日志区最小高度
             int nonClient = Height - ClientSize.Height;
-            int minHeight = Math.Max(520, required + nonClient);
+            int minHeight = Math.Max(560, required + nonClient);
             if (MinimumSize.Height != minHeight)
             {
                 MinimumSize = new Size(MinimumSize.Width, minHeight);
@@ -270,14 +309,6 @@ public sealed class MainForm : Form
         {
             _updatingMin = false;
         }
-    }
-
-    private void UpdateBottomBandHeight()
-    {
-        if (_rootLayout is null || _bottomGrid is null) return;
-        int h = BottomContentHeight() + 4;
-        RowStyle style = _rootLayout.RowStyles[3];
-        if (Math.Abs(style.Height - h) > 0.5f) style.Height = h;
     }
 
     private MenuStrip BuildMenu()
@@ -407,173 +438,9 @@ public sealed class MainForm : Form
         parent.DropDownItems.Add(item);
     }
 
-    /// <summary>底部一条：左边端口/网络，右边两行选项和发送框。高度固定，不换行拆字。</summary>
-    private Control BuildBottomBand()
-    {
-        var band = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0), Padding = new Padding(2, 0, 2, 0), BackColor = Theme.Canvas };
-        var grid = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 4,
-            Margin = new Padding(0),
-            BackColor = Theme.Canvas,
-        };
-        _bottomGrid = grid;
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight()));
-        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight()));
-        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight() + 2));
-        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight() + 2));
-
-        _serialRows = BuildSerialRows();
-        _netRows = BuildNetRows();
-        for (int i = 0; i < 3; i++)
-        {
-            var cell = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 6, 0), BackColor = Theme.Canvas };
-            _netRows[i].Visible = false;
-            cell.Controls.Add(_serialRows[i]);
-            cell.Controls.Add(_netRows[i]);
-            grid.Controls.Add(cell, 0, i);
-        }
-
-        _settingsRow1 = BuildOptionsRow();
-        grid.Controls.Add(_settingsRow1, 1, 0);
-        _settingsRow2 = BuildVerifyRow();
-        grid.Controls.Add(_settingsRow2, 1, 1);
-        _sendArea = BuildSendArea();
-        grid.Controls.Add(_sendArea, 1, 2);
-        grid.SetRowSpan(_sendArea, 2);
-
-        _settingsRow1.SizeChanged += (_, _) => { UpdateBottomGridRows(); ScheduleResponsiveRelayout(); };
-        _settingsRow2.SizeChanged += (_, _) => { UpdateBottomGridRows(); ScheduleResponsiveRelayout(); };
-        UpdateBottomGridRows();
-        band.Controls.Add(grid);
-        UpdateLeftColumnWidth();
-        return band;
-    }
-
-    private void UpdateLeftColumnWidth()
-    {
-        if (_bottomGrid is null) return;
-        int need = 0;
-        for (int i = 0; i < 3; i++)
-        {
-            FlowLayoutPanel row = _netMode == NetMode.Serial ? _serialRows[i] : _netRows[i];
-            need = Math.Max(need, FlowContentWidth(row));
-        }
-        _bottomGrid.ColumnStyles[0].Width = Math.Max(240, need + 6);
-    }
-
-    private void UpdateBottomGridRows()
-    {
-        if (_bottomGrid is null || _settingsRow1 is null || _settingsRow2 is null) return;
-        // 自绘下拉框比原生行高多出约 4px，行高留出上下 Margin，避免 200% DPI 下被裁掉。
-        SetGridRowHeight(0, Math.Max(LineHeight(), _settingsRow1.Height) + 4);
-        SetGridRowHeight(1, Math.Max(LineHeight(), _settingsRow2.Height) + 4);
-        UpdateBottomBandHeight();
-    }
-
-    private void SetGridRowHeight(int row, int height)
-    {
-        RowStyle style = _bottomGrid.RowStyles[row];
-        if (Math.Abs(style.Height - height) > 0.5f) style.Height = height;
-    }
-
-    private int BottomContentHeight() =>
-        (_settingsRow1 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow1.Height) + 4)
-        + (_settingsRow2 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow2.Height) + 4)
-        + (LineHeight() + 2) * 2;
-
-    private static int FlowContentWidth(FlowLayoutPanel row, bool onlyVisible = true)
-    {
-        int w = row.Padding.Horizontal;
-        foreach (Control c in row.Controls)
-            if (!onlyVisible || c.Visible)
-                w += c.Width + c.Margin.Horizontal;
-        return w;
-    }
-
-    private static int MaxRowWidth(Control? root, bool onlyVisible = true)
-    {
-        if (root is null) return 0;
-        int max = 0;
-        foreach (Control child in root.Controls)
-            if (child is FlowLayoutPanel row)
-                max = Math.Max(max, FlowContentWidth(row, onlyVisible));
-        return max;
-    }
-
-    private FlowLayoutPanel[] BuildSerialRows()
-    {
-        int unit = TextUnit();
-        _portCombo = new ThemeComboBox { Width = unit * 10, DropDownStyle = ComboBoxStyle.DropDown };
-        _openButton = new ThemeButton { Text = "打开串口", AutoSize = true, Kind = ThemeButton.ButtonKind.Primary };
-        _baudCombo = new ThemeComboBox { Width = unit * 7, DropDownStyle = ComboBoxStyle.DropDownList };
-        foreach (var b in ComPortService.BaudItems) _baudCombo.Items.Add(b);
-        _baudCombo.SelectedIndex = 13; // 115200
-        _customBaudBox = new ThemeTextBox { Width = unit * 6, Text = _port.CustomBaud.ToString(), Visible = false };
-        _customBaudBox.VisibleChanged += (_, _) => UpdateLeftColumnWidth();
-        _rtsBox = new ThemeCheckBox { Text = "RTS", AutoSize = true };
-        _dtrBox = new ThemeCheckBox { Text = "DTR", AutoSize = true };
-        _moreSettingsButton = new ThemeButton { Text = "更多串口设置", AutoSize = true };
-        _moreSettingsButton.Click += (_, _) => ShowPortSettings();
-
-        var row1 = MakeTopLine();
-        Put(row1, new Label { Text = "端口号", AutoSize = true });
-        Put(row1, _portCombo);
-
-        var row2 = MakeTopLine();
-        Put(row2, _openButton);
-        var refresh = new ThemeButton { Text = "↻", AutoSize = true };
-        refresh.Click += (_, _) => RefreshPortList();
-        _rowTip.SetToolTip(refresh, "刷新串口列表");
-        Put(row2, refresh);
-        Put(row2, _moreSettingsButton);
-
-        var row3 = MakeTopLine();
-        Put(row3, _rtsBox);
-        Put(row3, _dtrBox);
-        Put(row3, new Label { Text = "波特率", AutoSize = true });
-        Put(row3, _baudCombo);
-        Put(row3, _customBaudBox);
-        return [row1, row2, row3];
-    }
-
-    private FlowLayoutPanel[] BuildNetRows()
-    {
-        int unit = TextUnit();
-        Label Lb(string text) => new() { Text = text, AutoSize = true };
-        _remoteIpBox = new ThemeTextBox { Width = unit * 12 };
-        _remotePortBox = new ThemeTextBox { Width = unit * 6, Text = "8080" };
-        _localIpCombo = new ThemeComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDown };
-        _localPortBox = new ThemeTextBox { Width = unit * 6, Text = "8080" };
-        _connectButton = new ThemeButton { Text = "连接", AutoSize = true, Kind = ThemeButton.ButtonKind.Primary };
-        _disconnectButton = new ThemeButton { Text = "断开", AutoSize = true };
-        _connectButton.Click += (_, _) => ConnectNetwork();
-        _disconnectButton.Click += (_, _) => DisconnectNetwork();
-
-        var row1 = MakeTopLine();
-        Put(row1, Lb("远程"));
-        Put(row1, _remoteIpBox);
-        Put(row1, Lb("端口"));
-        Put(row1, _remotePortBox);
-        var row2 = MakeTopLine();
-        Put(row2, Lb("本地"));
-        Put(row2, _localIpCombo);
-        Put(row2, Lb("端口"));
-        Put(row2, _localPortBox);
-        var row3 = MakeTopLine();
-        Put(row3, _connectButton);
-        Put(row3, _disconnectButton);
-        return [row1, row2, row3];
-    }
-
     private Control BuildToolBar()
     {
         var panel = MakeWrapLine();
-        Put(panel, ActionButton("清除窗口", ClearReceive));
         Put(panel, ActionButton("打开文件", OpenFile));
         _filePathBox = new ThemeTextBox
         {
@@ -612,7 +479,6 @@ public sealed class MainForm : Form
 
         _hexDisplayBox = Cb("HEX显示");
         Put(row, _hexDisplayBox);
-        Put(row, ActionButton("保存数据", SaveData));
         _recvToFileBox = Cb("接收数据到文件");
         Put(row, _recvToFileBox);
         _hexSendBox = Cb("HEX发送");
@@ -898,55 +764,6 @@ public sealed class MainForm : Form
     }
 
     private int TextUnit() => Math.Max(7, TextRenderer.MeasureText("0", Font).Width);
-
-    private Control BuildCenter()
-    {
-        _recvBox = new ThemeTextBox
-        {
-            Multiline = true,
-            ReadOnly = false,
-            ScrollBars = ScrollBars.Vertical,
-            WordWrap = true,
-            AcceptsReturn = true,
-            Dock = DockStyle.Fill,
-            BorderStyle = BorderStyle.None,
-            BackColor = Theme.Log,
-            ForeColor = Theme.Text,
-            Font = Theme.MonoFont(10F),
-            Tag = "log",
-        };
-
-        _split = new SplitContainer
-        {
-            Dock = DockStyle.Fill,
-            Orientation = Orientation.Vertical,
-            BackColor = Theme.Border,
-        };
-        _split.Panel1.BackColor = Theme.Log;
-        _split.Panel2.BackColor = Theme.Surface;
-        var recvHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(1), BackColor = Theme.Border };
-        recvHost.Controls.Add(_recvBox);
-        _split.Panel1.Controls.Add(recvHost);
-        _split.Panel2.Controls.Add(BuildMultiPanel());
-        _split.Panel2Collapsed = true;   // 规格：多条面板初始隐藏
-        _split.Resize += (_, _) =>
-        {
-            if (!_split.Panel2Collapsed) ApplyMultiWidth();
-        };
-        // 只有用户拖动分割线才记宽度。程序自己改宽度也会触发 SplitterMoved，不能当成用户的选择。
-        _split.SplitterMoving += (_, _) =>
-        {
-            if (!_adjustingSplit) _userMovingSplitter = true;
-        };
-        _split.SplitterMoved += (_, _) =>
-        {
-            if (!_userMovingSplitter || _adjustingSplit || _split.Panel2Collapsed) return;
-            _userMovingSplitter = false;
-            _multiWidthCustom = true;
-            _multiPanelWidth = _split.Panel2.Width;
-        };
-        return _split;
-    }
 
     /// <summary>多条字符串面板：顶部循环发送开关 + 3 页，每页 99 行（HEX/数据/点击发送/顺序/延时）。</summary>
     private Control BuildMultiPanel()
@@ -1304,11 +1121,31 @@ public sealed class MainForm : Form
         _sentStatus = new ToolStripStatusLabel("S:0") { AutoSize = true };
         _recvStatus = new ToolStripStatusLabel("R:0") { AutoSize = true };
         _modemStatus = new ToolStripStatusLabel("CTS=- DSR=- RLSD=-") { AutoSize = true, Margin = new Padding(0, 3, 8, 2) };
+        _rxRateLabel = new ToolStripStatusLabel("RX 0 B/s") { AutoSize = true, ForeColor = Theme.Accent };
+        _txRateLabel = new ToolStripStatusLabel("TX 0 B/s") { AutoSize = true, ForeColor = Theme.StatusSend };
+        _bufferLabel = new ToolStripStatusLabel("缓冲 0%") { AutoSize = true, ForeColor = Theme.Muted };
+        _sparkline = new Sparkline
+        {
+            Width = Math.Max(72, Font.Height * 3),
+            Height = Math.Max(14, Font.Height - 8),
+            Margin = new Padding(6, 0, 4, 0),
+        };
+        var sparkHost = new ToolStripControlHost(_sparkline)
+        {
+            AutoSize = false,
+            Width = _sparkline.Width,
+            Height = _sparkline.Height,
+            Margin = new Padding(4, 0, 3, 0),
+        };
         _connStatus.ForeColor = Theme.Text;
         _sentStatus.ForeColor = Theme.StatusSend;
         _recvStatus.ForeColor = Theme.Accent;
         _modemStatus.ForeColor = Theme.Muted;
-        strip.Items.AddRange(new ToolStripItem[] { _connStatus, _sentStatus, _recvStatus, _modemStatus });
+        strip.Items.AddRange(new ToolStripItem[]
+        {
+            _connStatus, _sentStatus, _recvStatus, _modemStatus,
+            sparkHost, _rxRateLabel, _txRateLabel, _bufferLabel,
+        });
         Theme.StyleStatus(strip);
         return strip;
     }
@@ -1425,8 +1262,7 @@ public sealed class MainForm : Form
         }
         if (replace is not null)
         {
-            _recvBox.Text = replace;                // 截断后的整屏重画
-            _recvBox.SelectionStart = _recvBox.TextLength;
+            RenderLogFromText(replace);             // 截断后的整屏重画（保留分色）
         }
         else if (text.Length > 0)
         {
@@ -1461,12 +1297,13 @@ public sealed class MainForm : Form
         int selLen = _recvBox.SelectionLength;
         Point scroll = GetRecvScroll();
 
-        _recvBox.AppendText(text);
+        AppendFormatted(text);
 
-        if (atBottom)
+        if (_autoFollow && atBottom)
         {
             _recvBox.SelectionStart = _recvBox.TextLength;
             _recvBox.SelectionLength = 0;
+            _recvBox.ScrollToCaret();
         }
         else
         {
@@ -1512,6 +1349,9 @@ public sealed class MainForm : Form
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     private const int EM_SETCUEBANNER = 0x1501;
 
@@ -1597,16 +1437,16 @@ public sealed class MainForm : Form
             }
         }
         // 切换生效：清空接收框后整体重画对应累积
-        _recvBox.Text = _hexDisplayBox.Checked ? _receive.HexText : _receive.TextAccum;
-        _recvBox.SelectionStart = _recvBox.TextLength;
+        RenderLogBuffer();
     }
 
     private void ClearReceive()
     {
+        ClearSearchHighlight();
         _recvBox.Clear();
+        _receive.Clear();                     // 三个累积串与半字节状态一并清空
         Interlocked.Exchange(ref _sentCount, 0);   // 规格：清除窗口把两个计数清 0
         Interlocked.Exchange(ref _recvCount, 0);
-        _receive.Clear();                     // 三个累积串与半字节状态一并清空
         UpdateStatus();
     }
 
@@ -1620,7 +1460,8 @@ public sealed class MainForm : Form
 
         try
         {
-            File.WriteAllBytes(txtPath, SendComposer.EncodeGbk(_recvBox.Text));   // 窗口内容（原程序用 Lines.SaveToFile）
+            string windowText = _recvBox.Text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n");
+            File.WriteAllBytes(txtPath, SendComposer.EncodeGbk(windowText));   // 窗口内容（原程序用 Lines.SaveToFile）
         }
         catch
         {
@@ -2152,12 +1993,10 @@ public sealed class MainForm : Form
     private void UpdateModePanels()
     {
         bool serial = _netMode == NetMode.Serial;
-        for (int i = 0; i < 3; i++)
-        {
-            _serialRows[i].Visible = serial;
-            _netRows[i].Visible = !serial;
-        }
-        UpdateLeftColumnWidth();
+        if (_serialSection is not null) _serialSection.Visible = serial;
+        if (_netSection is not null) _netSection.Visible = !serial;
+        if (_sideModeLabel is not null) _sideModeLabel.Text = serial ? "串口" : "网络";
+        _sidePanel?.PerformLayout();
     }
 
     /// <summary>按模式禁用字段（规格：模式1 禁本地端口；模式2 禁远程IP/端口；模式3 全开）。</summary>
@@ -2255,10 +2094,15 @@ public sealed class MainForm : Form
     {
         base.OnShown(e);
         ApplyMultiWidth();
-        // 构造期窗体不可见，Control.Visible 全为 false，左栏测宽要在显示后校正
-        UpdateLeftColumnWidth();
+        if (_bodyLayout is not null)
+            _bodyLayout.ColumnStyles[0].Width = SidebarWidth();
+        _sidePanel?.PerformLayout();
+        UpdateComposerLayout();
         UpdateMinimumHeight();
         SetCueBanner(_sendBox, "在此输入要发送的数据");
+        _lastSentSample = Interlocked.Read(ref _sentCount);
+        _lastRecvSample = Interlocked.Read(ref _recvCount);
+        _rateTimer.Start();
         StartMultiHandlePrewarm();
         // 规格：勾了“启动时立即打开串口”，启动后自动打开（串口）/连接（网络）。加载 ini 在这之前。
         if (!_openImmediatelyItem.Checked) return;
@@ -2482,12 +2326,12 @@ public sealed class MainForm : Form
 
     private void ToggleBottomPanels()
     {
-        // 规格：━ 按钮隐藏/恢复设置区与信息条；标题在 ■ / ━ 间切换
-        bool show = !_settingsRow1.Visible;
-        _settingsRow1.Visible = show;
-        _settingsRow2.Visible = show;
-        _sendArea.Visible = show;
+        if (_composerPanel is null) return;
+        // 规格：━ 按钮隐藏/恢复设置区与发送区；标题在 ■ / ━ 间切换
+        bool show = !_composerPanel.Visible;
+        _composerPanel.Visible = show;
         _collapseButton.Text = show ? "━" : "■";
+        UpdateComposerLayout();
     }
 
     /// <summary>切换深/浅主题；不自动保存，调用方决定（菜单点击会 AutoSave，启动/导入不保存）。</summary>
@@ -2509,6 +2353,13 @@ public sealed class MainForm : Form
         _sentStatus.ForeColor = Theme.StatusSend;
         _recvStatus.ForeColor = Theme.Accent;
         _modemStatus.ForeColor = Theme.Muted;
+        _rxRateLabel.ForeColor = Theme.Accent;
+        _txRateLabel.ForeColor = Theme.StatusSend;
+        _bufferLabel.ForeColor = Theme.Muted;
+        _sparkline.BackColor = Theme.Surface2;
+        _sparkline.Invalidate();
+        if (_recvBox.ContextMenuStrip is ContextMenuStrip logMenu) Theme.StyleContextMenu(logMenu);
+        RenderLogAll();
         StatusTick();
         UpdateStatus();
     }
@@ -2523,15 +2374,27 @@ public sealed class MainForm : Form
             int baud = ComPortService.BaudValueOf(_baudCombo.SelectedIndex, _port.CustomBaud);
             string baudText = _baudCombo.SelectedIndex <= 0 ? baud.ToString() : _baudCombo.Text;
             _connStatus.Text = $"{portName}{state}{baudText}bps,{_port.LineDescription()}";
+            if (_logTitleLabel is not null)
+                _logTitleLabel.Text = portName.Length > 0 ? portName : "未选择端口";
+            if (_logSubLabel is not null)
+                _logSubLabel.Text = $"{baudText}bps · {_port.LineDescription()}";
+            if (_lineInfoLabel is not null)
+                _lineInfoLabel.Text = open ? $"已打开 · {baudText}bps" : "未打开";
+            if (_sideModeLabel is not null) _sideModeLabel.Text = "串口";
         }
         else
         {
             // 规格：网络模式面板 3 是整个全局串 0x4ED538（下拉文本 + 本机 IP 文本）
             _connStatus.Text = $"{_portCombo.Text} {_localIpCombo.Text}  {(_net.Ready ? "已连接" : "未连接")}";
+            if (_logTitleLabel is not null) _logTitleLabel.Text = _portCombo.Text;
+            if (_logSubLabel is not null)
+                _logSubLabel.Text = $"{_remoteIpBox.Text}:{_remotePortBox.Text} · {(_net.Ready ? "已连接" : "未连接")}";
+            if (_sideModeLabel is not null) _sideModeLabel.Text = "网络";
         }
         _sentStatus.Text = $"S:{Interlocked.Read(ref _sentCount)}";
         _recvStatus.Text = $"R:{Interlocked.Read(ref _recvCount)}";
         _openButton.Text = _port.IsOpen ? "关闭串口" : "打开串口";
+        RefreshLogHeaderLayout();
     }
 
     private TermSwitches CurrentTermSwitches() => new(
@@ -2650,6 +2513,7 @@ public sealed class MainForm : Form
         catch (ArgumentException)
         {
             _recvBox.ForeColor = color;
+            RenderLogAll();
             return;
         }
         if (points < 1f || float.IsNaN(points) || float.IsInfinity(points)) points = 9f;
@@ -2662,6 +2526,7 @@ public sealed class MainForm : Form
         catch (ArgumentException)
         {
             _recvBox.ForeColor = color;
+            RenderLogAll();
             return;
         }
 
@@ -2675,6 +2540,7 @@ public sealed class MainForm : Form
         }
         if (!ReferenceEquals(previous, _recvBox.Font) && !ReferenceEquals(previous, Font))
             previous.Dispose();
+        RenderLogAll();
     }
 
     private void PickRecvBackColor()
@@ -2717,6 +2583,7 @@ public sealed class MainForm : Form
 
     private void OnMainFormClosing(object? sender, FormClosingEventArgs e)
     {
+        _rateTimer.Stop();
         _abortFlag = true;
         _loopSendBox.Checked = false;
         _timerSendBox.Checked = false;
@@ -3068,8 +2935,10 @@ public sealed class MainForm : Form
             {
                 // 窗口还太窄时设不了最小宽度，下一轮再试
             }
-            // 没拖过：大约四分之一。拖过：用记下的像素。比窗口一半还宽的是展开时误记的，不当数。
-            int want2 = _multiWidthCustom ? _multiPanelWidth : Math.Max(160, total / 4);
+            // 没拖过：约 340 逻辑像素（宽窗口下比四分之一窄）。拖过：用记下的像素。
+            int want2 = _multiWidthCustom
+                ? _multiPanelWidth
+                : Math.Max(Math.Max(320, Theme.Scale(this, 340)), total / 4);
             if (want2 > total / 2)
             {
                 _multiWidthCustom = false;

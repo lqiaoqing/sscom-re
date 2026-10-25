@@ -46,6 +46,9 @@ internal static class Theme
         StatusHigh = Color.FromArgb(78, 46, 34),
         StatusMid = Color.FromArgb(66, 50, 34),
         StatusLow = Color.FromArgb(54, 48, 34),
+        TxWash = Hex("#17140F"),
+        ErrorWash = Hex("#1A1111"),
+        SearchHighlight = Hex("#365E58"),
         WarmFillAlpha = 20,
         WarmBorderAlpha = 44,
     };
@@ -84,6 +87,9 @@ internal static class Theme
         StatusHigh = Hex("#F9E2D5"),
         StatusMid = Hex("#FAEBD9"),
         StatusLow = Hex("#FCF3E4"),
+        TxWash = Hex("#FCF6E9"),
+        ErrorWash = Hex("#FBEDED"),
+        SearchHighlight = Hex("#C9E7E2"),
         WarmFillAlpha = 30,
         WarmBorderAlpha = 70,
     };
@@ -122,6 +128,10 @@ internal static class Theme
     public static Color VerifyField => Current.VerifyField;
     public static int WarmFillAlpha => Current.WarmFillAlpha;
     public static int WarmBorderAlpha => Current.WarmBorderAlpha;
+
+    public static Color TxWash => Current.TxWash;
+    public static Color ErrorWash => Current.ErrorWash;
+    public static Color SearchHighlight => Current.SearchHighlight;
 
     public static Color StatusBackground(long count) => count switch
     {
@@ -344,6 +354,9 @@ internal static class Theme
         if (color == old.StatusHigh) return now.StatusHigh;
         if (color == old.StatusMid) return now.StatusMid;
         if (color == old.StatusLow) return now.StatusLow;
+        if (color == old.TxWash) return now.TxWash;
+        if (color == old.ErrorWash) return now.ErrorWash;
+        if (color == old.SearchHighlight) return now.SearchHighlight;
         return color;
     }
 
@@ -407,6 +420,17 @@ internal static class Theme
         if (item.Text != wanted) item.Text = wanted;
     }
 
+    public static void StyleContextMenu(ContextMenuStrip menu)
+    {
+        menu.BackColor = Surface;
+        menu.ForeColor = Text;
+        menu.ShowImageMargin = false;
+        menu.ShowCheckMargin = false;
+        menu.RenderMode = ToolStripRenderMode.Professional;
+        menu.Renderer = new ThemeMenuRenderer();
+        foreach (ToolStripItem item in menu.Items) item.ForeColor = Text;
+    }
+
     public static void StyleStatus(StatusStrip strip)
     {
         strip.BackColor = Surface2;
@@ -444,6 +468,10 @@ internal static class Theme
                 themeBox.BackColor = (themeBox.Tag as string) == "log" ? Log : Field;
                 themeBox.ForeColor = themeBox.ReadOnly ? Muted : Text;
                 themeBox.Invalidate();
+                break;
+            case RichTextBox rich:
+                rich.BackColor = Log;
+                rich.ForeColor = Text;
                 break;
             case Label label:
                 label.ForeColor = Muted;
@@ -496,6 +524,7 @@ internal sealed class ThemePalette
     public Color Text, Muted, Dim, Accent, AccentBright, AccentDeep, AccentInk;
     public Color Amber, AmberInk, AmberText, StatusSend, CheckFill, CheckBorder, CheckActiveBorder, Danger, Green, VerifyField;
     public Color StatusCritical, StatusHigh, StatusMid, StatusLow;
+    public Color TxWash, ErrorWash, SearchHighlight;
     public int WarmFillAlpha, WarmBorderAlpha;
 }
 
