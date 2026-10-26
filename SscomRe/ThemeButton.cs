@@ -14,12 +14,16 @@ internal sealed class ThemeButton : Button
         Outline,
         Danger,
         Icon,
+        Soft,
+        Segment,
+        SegmentSelected,
     }
 
     private bool _hover;
     private bool _pressed;
 
     public ButtonKind Kind { get; set; } = ButtonKind.Default;
+    public bool AccentText { get; set; }
 
     public ThemeButton()
     {
@@ -37,7 +41,7 @@ internal sealed class ThemeButton : Button
     private int IconSize => Math.Max(12, (int)(Font.Height * 0.72F));
     private int IconGap => Math.Max(4, Theme.Scale(this, 6));
 
-    private static bool IsIconOnly(string text) => text is "↻" or "−" or "＋" or "━" or "■" or "«" or "»";
+    private static bool IsIconOnly(string text) => text is "↻" or "−" or "＋" or "×" or "━" or "■" or "«" or "»";
 
     private static bool HasIcon(string text) => text switch
     {
@@ -72,7 +76,7 @@ internal sealed class ThemeButton : Button
         Rectangle bounds = ClientRectangle;
         bounds.Width = Math.Max(1, bounds.Width - 1);
         bounds.Height = Math.Max(1, bounds.Height - 1);
-        int radius = Theme.Scale(this, 5);
+        int radius = Theme.Scale(this, Kind is ButtonKind.Segment or ButtonKind.SegmentSelected ? 8 : 5);
 
         Color back = Color.Transparent;
         Color border = Color.Transparent;
@@ -111,6 +115,21 @@ internal sealed class ThemeButton : Button
                     border = _hover ? Theme.Border : Color.Transparent;
                     fore = _hover ? Theme.Text : Theme.Muted;
                     break;
+                case ButtonKind.Soft:
+                    back = _pressed ? Theme.Pressed : _hover ? Theme.Hover : Theme.WithAlpha(14, Theme.Accent);
+                    border = _hover ? Theme.WithAlpha(95, Theme.Accent) : Theme.BorderSoft;
+                    fore = _hover ? Theme.AccentBright : Theme.Muted;
+                    break;
+                case ButtonKind.Segment:
+                    back = _pressed ? Theme.Pressed : _hover ? Theme.Hover : Theme.Surface;
+                    border = _hover ? Theme.Border : Theme.BorderSoft;
+                    fore = _hover ? Theme.Text : Theme.Muted;
+                    break;
+                case ButtonKind.SegmentSelected:
+                    back = _pressed ? Theme.AccentDeep : _hover ? Theme.AccentBright : Theme.Accent;
+                    border = Theme.Accent;
+                    fore = Theme.AccentInk;
+                    break;
                 default:
                     back = _pressed ? Theme.Pressed : _hover ? Theme.Hover : Color.Transparent;
                     border = _hover ? Theme.Border : Color.Transparent;
@@ -118,6 +137,9 @@ internal sealed class ThemeButton : Button
                     break;
             }
         }
+
+        if (AccentText && Enabled && Kind == ButtonKind.Soft)
+            fore = _hover ? Theme.AccentBright : Theme.Accent;
 
         if (back.A > 0)
         {
@@ -203,6 +225,10 @@ internal sealed class ThemeButton : Button
             case "＋":
                 g.DrawLine(pen, x + w * .18F, y + h * .5F, x + w * .82F, y + h * .5F);
                 g.DrawLine(pen, x + w * .5F, y + h * .18F, x + w * .5F, y + h * .82F);
+                break;
+            case "×":
+                g.DrawLine(pen, x + w * .28F, y + h * .28F, x + w * .72F, y + h * .72F);
+                g.DrawLine(pen, x + w * .72F, y + h * .28F, x + w * .28F, y + h * .72F);
                 break;
             case "«":
                 g.DrawLines(pen, new[]

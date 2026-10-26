@@ -5,7 +5,7 @@ using System.Threading;
 namespace SscomRe;
 
 /// <summary>
-/// 开发自检：`SscomRe.exe --selftest` 时运行并把结果写到标准输出（重定向可收集）。
+/// 开发自检：`sscomRe_v<版本>.exe --selftest` 时运行并把结果写到标准输出（重定向可收集）。
 /// 覆盖组包与校验算法的关键用例；不参与正常启动。
 /// </summary>
 internal static class SelfTest
@@ -483,6 +483,8 @@ internal static class SelfTest
             snap.Delay[198] = "2500";
             snap.ThemeLight = true;
             snap.SideCollapsed = true;
+            snap.MultiPageCount = 2;
+            snap.AutoScroll = false;
 
             string t1 = IniDocument.Save(snap);
             CheckText("ini 含HEX注释", t1.Contains(IniDocument.CommentHex) ? "yes" : "no", "yes");
@@ -494,6 +496,8 @@ internal static class SelfTest
             CheckText("ini 写N1058为1000", t1.Contains("N1058=,1000\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写浅色主题", t1.Contains("N1092=,1\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写连接栏折叠", t1.Contains("N1093=,1\r\n") ? "yes" : "no", "yes");
+            CheckText("ini 写多条页数", t1.Contains("N1094=,2\r\n") ? "yes" : "no", "yes");
+            CheckText("ini 写自动滚动关闭", t1.Contains("N1095=,0\r\n") ? "yes" : "no", "yes");
 
             var loaded = IniDocument.Load(t1);
             string t2 = IniDocument.Save(loaded);
@@ -521,9 +525,17 @@ internal static class SelfTest
             CheckText("ini 第3页延时", loaded.Delay[198], "2500");
             CheckText("ini 含第2页键", t1.Contains("\r\nN201=H,第二页\r\n") && t1.Contains("\r\nN301=4,注2,1000\r\n") ? "yes" : "no", "yes");
             CheckText("ini 含第3页键", t1.Contains("\r\nN401=A,第三页\r\n") && t1.Contains("\r\nN501=0,1,2500\r\n") ? "yes" : "no", "yes");
+            CheckText("ini 还原多条页数", loaded.MultiPageCount.ToString(), "2");
+            CheckText("ini 还原自动滚动关闭", loaded.AutoScroll ? "yes" : "no", "no");
+            CheckText("ini 新档默认自动滚动", new IniSnapshot().AutoScroll ? "yes" : "no", "yes");
+            CheckText("旧ini默认自动滚动", IniDocument.Load("").AutoScroll ? "yes" : "no", "yes");
             var legacy = IniDocument.Load("N1=A,hello\r\nN101=2,cmt,1500\r\n");
             CheckText("旧ini第1页仍在", legacy.Data[0], "hello");
             CheckText("旧ini第2页仍是空", legacy.Data[99], "");
+            CheckText("旧ini默认一页", legacy.MultiPageCount.ToString(), "1");
+            CheckText("ini 新档默认一页", new IniSnapshot().MultiPageCount.ToString(), "1");
+            CheckText("页数上限夹到三", IniDocument.Load("N1094=,9\r\n").MultiPageCount.ToString(), "3");
+            CheckText("页数下限夹到一", IniDocument.Load("N1094=,0\r\n").MultiPageCount.ToString(), "1");
             CheckText("ini 还原字体", $"{loaded.FontName},{loaded.FontSize},{loaded.FontStyle},{loaded.FontColor}",
                 "Consolas,16,5," + Color.FromArgb(255, 20, 30, 40).ToArgb().ToString());
             CheckText("ini 还原浅色主题", loaded.ThemeLight ? "yes" : "no", "yes");
@@ -625,6 +637,31 @@ internal static class SelfTest
                 recv.SelectionLength = 0;
                 recv.ScrollToCaret();
                 Application.DoEvents();
+                CheckText("自动滚动默认开启", form.AutoScrollEnabledForTest ? "yes" : "no", "yes");
+                form.SetAutoScrollForTest(false);
+                form.AppendLogForTest(string.Join("\r\n", Enumerable.Range(0, 200).Select(i => "new line " + i)));
+                Application.DoEvents();
+                CheckText("关闭自动滚动后不跟随", form.RecvAtBottomForTest() ? "yes" : "no", "no");
+                form.SetAutoScrollForTest(true);
+                Application.DoEvents();
+                CheckText("重新开启自动滚动回到底部", form.RecvAtBottomForTest() ? "yes" : "no", "yes");
+                recv.SelectionStart = 0;
+                recv.SelectionLength = 0;
+                recv.ScrollToCaret();
+                Application.DoEvents();
+                form.AppendLogForTest("auto-scroll-tail");
+                Application.DoEvents();
+                CheckText("勾选时上翻后仍回底", form.RecvAtBottomForTest() ? "yes" : "no", "yes");
+                recv.SelectionStart = 0;
+                recv.SelectionLength = 0;
+                recv.ScrollToCaret();
+                Application.DoEvents();
+                Size before = form.Size;
+                form.Size = new Size(form.Width - 80, form.Height - 40);
+                Application.DoEvents();
+                CheckText("尺寸变化后仍跟随到底部", form.RecvAtBottomForTest() ? "yes" : "no", "yes");
+                form.Size = before;
+                Application.DoEvents();
             }
             CheckText("搜索无结果提示", form.SearchForTest("definitely-not-in-log") ? "yes" : "no", "yes");
             form.HideToastForTest();
@@ -696,6 +733,8 @@ internal static class SelfTest
 
             form.Width = Math.Max(820, form.MinimumSize.Width);
             Application.DoEvents();
+            form.ResetMultiPanelWidthForTest();
+            Application.DoEvents();
             foreach (var c in AllControls(form))
                 if (c is Button expand && expand.Text == "扩展")
                     expand.PerformClick();
@@ -753,15 +792,45 @@ internal static class SelfTest
                     if (c is Button b && b.Tag is Point p && p.Y == 2 && b.Height < b.Font.Height + 8)
                         shortSend++;
                 CheckText("点击发送按钮容得下字", shortSend == 0 ? "yes" : shortSend.ToString(), "yes");
-                int pages = 0;
+                form.SetMultiPageCountForTest(1);
+                CheckText("多条默认一页", form.MultiPageCountForTest.ToString(), "1");
+                CheckText("第1页可见", form.MultiPageVisibleForTest(0) ? "yes" : "no", "yes");
+                CheckText("第2页默认隐藏", form.MultiPageVisibleForTest(1) ? "yes" : "no", "no");
+                CheckText("第1页不能删除", form.MultiPageCloseVisibleForTest(0) ? "yes" : "no", "no");
+                int visibleTabs = 0;
                 int dataBoxes = 0;
                 foreach (var c in AllControls(form))
                 {
-                    if (c is Button pageButton && pageButton.Text is "第1页" or "第2页" or "第3页") pages++;
+                    if (c is Button pageButton && pageButton.Text is "第1页" or "第2页" or "第3页" && pageButton.Visible) visibleTabs++;
                     if (c is TextBox tb && tb.Tag is Point cell && cell.Y == 1) dataBoxes++;
                 }
-                CheckText("多条三页", pages.ToString(), "3");
-                CheckText("三页共297条", dataBoxes.ToString(), "297");
+                CheckText("默认只显示一个页签", visibleTabs.ToString(), "1");
+                CheckText("多条结构仍为297行", dataBoxes.ToString(), "297");
+
+                form.AddMultiPageForTest();
+                CheckText("增加到两页", form.MultiPageCountForTest.ToString(), "2");
+                CheckText("新增页自动选中", form.MultiPageSelectedForTest.ToString(), "1");
+                CheckText("第2页显示", form.MultiPageVisibleForTest(1) ? "yes" : "no", "yes");
+                CheckText("第2页有删除入口", form.MultiPageCloseVisibleForTest(1) ? "yes" : "no", "yes");
+                form.SetMultiPageDataForTest(1, 0, "第二页");
+
+                form.AddMultiPageForTest();
+                CheckText("增加到三页", form.MultiPageCountForTest.ToString(), "3");
+                form.SetMultiPageDataForTest(2, 0, "第三页");
+                form.AddMultiPageForTest();
+                CheckText("不能超过三页", form.MultiPageCountForTest.ToString(), "3");
+
+                form.RemoveMultiPageForTest(1);
+                CheckText("删除中间页", form.MultiPageCountForTest.ToString(), "2");
+                CheckText("后续页内容前移", form.MultiPageDataForTest(1, 0), "第三页");
+                CheckText("末页已清空", form.MultiPageDataForTest(2, 0), "");
+                CheckText("删除后选中前移页", form.MultiPageSelectedForTest.ToString(), "1");
+                CheckText("第3页删除入口收起", form.MultiPageCloseVisibleForTest(2) ? "yes" : "no", "no");
+                form.RemoveMultiPageForTest(0);
+                CheckText("第1页不可删除", form.MultiPageCountForTest.ToString(), "2");
+                form.RemoveMultiPageForTest(1);
+                CheckText("删除到只剩一页", form.MultiPageCountForTest.ToString(), "1");
+                CheckText("只剩第1页可见", form.MultiPageVisibleForTest(0) && !form.MultiPageVisibleForTest(1) ? "yes" : "no", "yes");
             }
 
             form.ToggleComposerForTest();
@@ -778,6 +847,12 @@ internal static class SelfTest
             form.OpenPortPopupForTest();
             Application.DoEvents();
             CheckText("端口浮层可打开", form.PortPopupVisibleForTest ? "yes" : "no", "yes");
+            form.ClosePortPopupForTest();
+            Application.DoEvents();
+            CheckText("日志头端口有内容", form.LogPortPickerTextForTest.Length > 0 ? "yes" : "no", "yes");
+            form.OpenLogPortPopupForTest();
+            Application.DoEvents();
+            CheckText("日志头端口浮层可打开", form.PortPopupVisibleForTest ? "yes" : "no", "yes");
             form.ClosePortPopupForTest();
             Application.DoEvents();
             CheckText("侧栏展开宽度", form.SidebarColumnWidthForTest.ToString(), form.SidebarExpandedWidthForTest.ToString());

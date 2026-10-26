@@ -169,7 +169,7 @@ public sealed partial class MainForm
         if (_sidePanel is null) return;
         bool collapsed = _sideCollapsed;
         bool freezeLog = _recvBox is { IsHandleCreated: true };
-        bool followBottom = freezeLog && _autoFollow && RecvAtBottom();
+        bool followBottom = freezeLog && _autoScrollBox.Checked;
         Point scroll = freezeLog ? GetRecvScroll() : Point.Empty;
         if (freezeLog) SendMessage(_recvBox.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
         bool drawerOpen = _split is { Panel2Collapsed: false };
@@ -242,7 +242,7 @@ public sealed partial class MainForm
         };
     }
 
-    private void TogglePortPopup()
+    private void TogglePortPopup(Control anchor)
     {
         if (_portPopup is null) return;
         if (_portPopup.Visible)
@@ -251,18 +251,19 @@ public sealed partial class MainForm
             return;
         }
         CloseFlyout();
-        _portPopup.Width = Math.Max(Theme.Scale(this, 250), _portField.Width);
+        _portPopupAnchor = anchor;
+        _portPopup.Width = Math.Max(Theme.Scale(this, 250), anchor.Width);
         string[] items = _portCombo.Items.Cast<object?>()
             .Select(item => item?.ToString() ?? "").ToArray();
         _portPopup.SetItems(items, _portCombo.SelectedIndex);
 
-        Point below = _portField.PointToScreen(new Point(0, _portField.Height + Theme.Scale(this, 4)));
+        Point below = anchor.PointToScreen(new Point(0, anchor.Height + Theme.Scale(this, 4)));
         Point position = PointToClient(below);
         int margin = Theme.Scale(this, 8);
         int bottomLimit = ClientSize.Height - (_statusStrip?.Height ?? 0) - margin;
         if (position.Y + _portPopup.Height > bottomLimit)
         {
-            Point above = _portField.PointToScreen(Point.Empty);
+            Point above = anchor.PointToScreen(Point.Empty);
             position.Y = Math.Max(margin,
                 PointToClient(above).Y - _portPopup.Height - Theme.Scale(this, 4));
         }
@@ -271,18 +272,28 @@ public sealed partial class MainForm
         _portPopup.Location = position;
         _portPopup.Visible = true;
         _portPopup.BringToFront();
-        _portField.Opened = true;
+        _portField.Opened = ReferenceEquals(anchor, _portField);
+        _logPortPicker.Opened = ReferenceEquals(anchor, _logPortPicker);
         _portField.Invalidate();
+        _logPortPicker.Invalidate();
         _portPopup.Focus();
     }
 
-    private void ClosePortPopup(bool focusField)
+    private bool IsPortPopupAnchor(Control control) =>
+        ReferenceEquals(control, _portField) || _portField.Contains(control) ||
+        ReferenceEquals(control, _logPortPicker) || _logPortPicker.Contains(control);
+
+    private void ClosePortPopup(bool focusAnchor)
     {
         if (_portPopup is null || !_portPopup.Visible) return;
         _portPopup.Visible = false;
+        Control? anchor = _portPopupAnchor;
+        _portPopupAnchor = null;
         _portField.Opened = false;
+        _logPortPicker.Opened = false;
         _portField.Invalidate();
-        if (focusField && _portField.CanFocus) _portField.Focus();
+        _logPortPicker.Invalidate();
+        if (focusAnchor && anchor is { CanFocus: true }) anchor.Focus();
     }
 
     private void ChoosePortFromPopup(int index)
@@ -317,14 +328,22 @@ public sealed partial class MainForm
     internal int SidebarExpandedWidthForTest => _sideWidth;
     internal bool SidebarToggleVisibleForTest => _sidebarToggle?.Visible == true;
     internal string SidebarToggleTextForTest => _sidebarToggle?.Text ?? "";
-    internal bool LogTitleVisibleForTest => _logTitleLabel is { Visible: true };
+    internal bool LogTitleVisibleForTest => _logPortPicker is { Visible: true };
+    internal string LogPortPickerTextForTest => _logPortPicker?.DisplayText ?? "";
+    internal void OpenLogPortPopupForTest() => TogglePortPopup(_logPortPicker);
+    internal void ResetMultiPanelWidthForTest()
+    {
+        _multiWidthCustom = false;
+        _multiPanelWidth = 0;
+        ApplyMultiWidth();
+    }
     internal string[] PortComboItemsForTest =>
         _portCombo.Items.Cast<object?>().Select(item => item?.ToString() ?? "").ToArray();
     internal int PortFieldWidthForTest => _portField?.Width ?? -1;
     internal int BaudComboWidthForTest => _baudCombo.Width;
     internal string PortFieldTextForTest => _portField?.DisplayText ?? "";
     internal string PortComboTextForTest => _portCombo?.Text ?? "";
-    internal void OpenPortPopupForTest() => TogglePortPopup();
+    internal void OpenPortPopupForTest() => TogglePortPopup(_portField);
     internal void ClosePortPopupForTest() => ClosePortPopup(false);
     internal bool PortPopupVisibleForTest => _portPopup?.Visible == true;
 
@@ -638,18 +657,15 @@ public sealed partial class MainForm
             Padding = new Padding(0),
             BackColor = Theme.Surface2,
         };
-        _logTitleLabel = new Label
+        _logPortPicker = new LogPortPicker
         {
-            Text = "未连接",
-            AutoSize = false,
-            AutoEllipsis = true,
             Width = 76,
             Height = Font.Height + 8,
-            ForeColor = Theme.Text,
             Font = new Font(Font.FontFamily, Font.Size + 1F, FontStyle.Bold),
-            TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, 0, 9, 0),
         };
+        _logPortPicker.PickerRequested += (_, _) => TogglePortPopup(_logPortPicker);
+        _rowTip.SetToolTip(_logPortPicker, "点击快捷切换串口/网络模式");
         _logSubLabel = new Label
         {
             Text = "",
@@ -674,7 +690,7 @@ public sealed partial class MainForm
         _sidebarToggle.Click += (_, _) =>
             SetSidebarCollapsed(!_sideCollapsed, persist: true, manual: true, automatic: false);
         labels.Controls.Add(_sidebarToggle);
-        labels.Controls.Add(_logTitleLabel);
+        labels.Controls.Add(_logPortPicker);
         labels.Controls.Add(_logSubLabel);
         UpdateSidebarToggle();
         bar.Controls.Add(labels, 0, 0);
@@ -733,18 +749,17 @@ public sealed partial class MainForm
 
     private void RefreshLogHeaderLayout()
     {
-        if (_logTitleLabel is null || _logSubLabel is null) return;
-        _logTitleLabel.ForeColor = Theme.Text;
+        if (_logPortPicker is null || _logSubLabel is null) return;
         _logSubLabel.ForeColor = Theme.Muted;
-        int h = Math.Max(Font.Height + 6, _logTitleLabel.Font.Height + 6);
-        int Measure(Label label) => TextRenderer.MeasureText(label.Text, label.Font,
+        int h = Math.Max(Font.Height + 6, _logPortPicker.Font.Height + 6);
+        int subWidth = TextRenderer.MeasureText(_logSubLabel.Text, _logSubLabel.Font,
             new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width + 20;
-        _logTitleLabel.Height = h;
-        _logTitleLabel.Width = Math.Max(40, Measure(_logTitleLabel));
+        _logPortPicker.Height = h;
+        _logPortPicker.Width = Math.Max(40, _logPortPicker.PreferredWidth);
         _logSubLabel.Height = h;
-        _logSubLabel.Width = Math.Max(40, Measure(_logSubLabel));
-        _logTitleLabel.Parent?.PerformLayout();
+        _logSubLabel.Width = Math.Max(40, subWidth);
+        _logPortPicker.Parent?.PerformLayout();
     }
 
     private Control BuildComposer()
@@ -1235,7 +1250,7 @@ public sealed partial class MainForm
             if (control is not null)
             {
                 if (ReferenceEquals(control, popup) || popup.Contains(control)) return false;
-                if (ReferenceEquals(control, _form._portField) || _form._portField.Contains(control)) return false;
+                if (_form.IsPortPopupAnchor(control)) return false;
                 if (ReferenceEquals(control.TopLevelControl, _form)) _form.ClosePortPopup(false);
                 return false;
             }

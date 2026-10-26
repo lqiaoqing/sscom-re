@@ -9,6 +9,7 @@ namespace SscomRe;
 public sealed partial class MainForm
 {
     private const int WM_SETREDRAW = 0x000B;
+    private bool _scrollLatestScheduled;
 
     private Color LogColorOf(LogFormatter.Kind kind) => kind switch
     {
@@ -118,7 +119,6 @@ public sealed partial class MainForm
             _recvBox.Text = text;
             return;
         }
-        bool atBottom = RecvAtBottom();
         int selStart = _recvBox.SelectionStart;
         int selLen = _recvBox.SelectionLength;
         Point scroll = GetRecvScroll();
@@ -136,11 +136,9 @@ public sealed partial class MainForm
             _recvBox.Invalidate();
         }
 
-        if (_autoFollow && atBottom)
+        if (_autoScrollBox.Checked)
         {
-            _recvBox.SelectionStart = _recvBox.TextLength;
-            _recvBox.SelectionLength = 0;
-            _recvBox.ScrollToCaret();
+            ScrollRecvToLatest();
         }
         else
         {
@@ -149,6 +147,27 @@ public sealed partial class MainForm
             _recvBox.Select(start, len);
             SetRecvScroll(scroll);
         }
+    }
+
+    private void ScrollRecvToLatest()
+    {
+        if (_recvBox is null || !_recvBox.IsHandleCreated) return;
+        _recvBox.SelectionStart = _recvBox.TextLength;
+        _recvBox.SelectionLength = 0;
+        _recvBox.ScrollToCaret();
+    }
+
+    /// <summary>尺寸/DPI/激活变化后等一次布局完成，再保证视图在末尾。</summary>
+    private void ScheduleScrollRecvToLatest()
+    {
+        if (_autoScrollBox is null || !_autoScrollBox.Checked ||
+            _scrollLatestScheduled || !IsHandleCreated || IsDisposed) return;
+        _scrollLatestScheduled = true;
+        BeginInvoke(new Action(() =>
+        {
+            _scrollLatestScheduled = false;
+            if (!IsDisposed && _autoScrollBox.Checked) ScrollRecvToLatest();
+        }));
     }
 
     /// <summary>主题/字体/颜色变化时重画当前可见日志（含发送回显和本地输入）。</summary>
@@ -163,21 +182,14 @@ public sealed partial class MainForm
         RenderLogFromText(_hexDisplayBox.Checked ? _receive.HexText : _receive.TextAccum);
     }
 
-    private void ToggleFollow()
+    private void ToggleFollow() => _autoScrollBox.Checked = !_autoScrollBox.Checked;
+
+    private void SyncFollowButton()
     {
-        _autoFollow = !_autoFollow;
-        if (_pauseButton is not null)
-        {
-            _pauseButton.Text = _autoFollow ? "暂停" : "继续";
-            _pauseButton.Kind = _autoFollow ? ThemeButton.ButtonKind.Default : ThemeButton.ButtonKind.Outline;
-            _pauseButton.Invalidate();
-        }
-        if (_autoFollow)
-        {
-            _recvBox.SelectionStart = _recvBox.TextLength;
-            _recvBox.SelectionLength = 0;
-            _recvBox.ScrollToCaret();
-        }
+        if (_pauseButton is null) return;
+        _pauseButton.Text = _autoScrollBox.Checked ? "暂停" : "继续";
+        _pauseButton.Kind = _autoScrollBox.Checked ? ThemeButton.ButtonKind.Default : ThemeButton.ButtonKind.Outline;
+        _pauseButton.Invalidate();
     }
 
     private void SearchNext(bool forward)
@@ -294,7 +306,7 @@ public sealed partial class MainForm
         _displayTimer.Stop();
         ClearReceive();
         HideToast();
-        _autoFollow = true;
+        _autoScrollBox.Checked = true;
         if (_hexDisplayBox.Checked != hex) _hexDisplayBox.Checked = hex;
         RefreshRecvSnapshot();
         BenchDecodeMs = 0;
@@ -327,6 +339,8 @@ public sealed partial class MainForm
     internal int LogTextLengthForBenchmark => _recvBox.TextLength;
     internal bool RecvAtBottomForTest() => RecvAtBottom();
     internal void AppendLogForTest(string text) => AppendRecv(text);
+    internal bool AutoScrollEnabledForTest => _autoScrollBox?.Checked == true;
+    internal void SetAutoScrollForTest(bool enabled) => _autoScrollBox.Checked = enabled;
 
     internal bool SearchForTest(string query)
     {

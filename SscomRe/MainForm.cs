@@ -1,3 +1,4 @@
+using System.Drawing.Drawing2D;
 using System.IO.Ports;
 using System.Net;
 using System.Runtime.InteropServices;
@@ -22,7 +23,6 @@ public sealed partial class MainForm : Form
     private readonly List<ToolStripMenuItem> _limitItems = new();
     private ThemeTextBox _searchBox = null!;
     private ThemeButton _pauseButton = null!;
-    private bool _autoFollow = true;
     private int _searchStart = -1;
     private int _searchLength;
     private ToolStripStatusLabel _rxRateLabel = null!;
@@ -48,6 +48,7 @@ public sealed partial class MainForm : Form
     private CheckBox _hexDisplayBox = null!;
     private CheckBox _hexSendBox = null!;
     private CheckBox _newLineBox = null!;
+    private CheckBox _autoScrollBox = null!;
     private CheckBox _timestampBox = null!;
     private CheckBox _recvToFileBox = null!;
     private TextBox _timeoutEdit = null!;
@@ -119,6 +120,17 @@ public sealed partial class MainForm : Form
     private readonly MultiRowsPanel[] _multiGrids = new MultiRowsPanel[IniDocument.MultiPageCount];
     private readonly Panel[] _multiPages = new Panel[IniDocument.MultiPageCount];
     private readonly ThemeButton[] _multiTabs = new ThemeButton[IniDocument.MultiPageCount];
+    private readonly ThemeButton?[] _multiCloseTabs = new ThemeButton?[IniDocument.MultiPageCount];
+    private ThemeButton _multiAddTab = null!;
+    private ThemeChip _multiPageChip = null!;
+    private Label _multiTitleLabel = null!;
+    private Label _multiSubLabel = null!;
+    private Label _multiWidthValue = null!;
+    private Label _multiFooterPage = null!;
+    private Label _multiFooterHint = null!;
+    private Label _multiFooterCount = null!;
+    private int _multiPageCount = 1;                    // N1094：可见页数，第 1 页始终存在
+    private int _multiPage;                             // 当前选中的页下标
     private Control _toolBar = null!;
     private bool _relayoutScheduled;
     private bool _updatingMin;
@@ -173,8 +185,9 @@ public sealed partial class MainForm : Form
     private TableLayoutPanel _netSection = null!;
     private ThemeChip _sideModeLabel = null!;
     private SideStatusCard _sideStatusCard = null!;
-    private Label _logTitleLabel = null!;
+    private LogPortPicker _logPortPicker = null!;
     private Label _logSubLabel = null!;
+    private Control? _portPopupAnchor;
     private bool _portOpenIntent;
     private Panel _composerPanel = null!;
     private TableLayoutPanel _composerGrid = null!;
@@ -184,7 +197,7 @@ public sealed partial class MainForm : Form
 
     public MainForm()
     {
-        Text = $"串口/网络数据调试器（重写版）v{AppVersion}";
+        Text = $"串口/网络数据调试器(定制版) v{AppVersion}";
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Microsoft YaHei UI", 9F);
         Width = 980;
@@ -266,8 +279,23 @@ public sealed partial class MainForm : Form
 
         toolBar.SizeChanged += (_, _) => { UpdateToolbarRowHeight(toolBar); ScheduleResponsiveRelayout(); };
         UpdateToolbarRowHeight(toolBar);
-        SizeChanged += (_, _) => { HideToast(); CloseFlyout(); ClosePortPopup(false); ScheduleResponsiveRelayout(); };
-        Move += (_, _) => { HideToast(); CloseFlyout(); ClosePortPopup(false); };
+        SizeChanged += (_, _) =>
+        {
+            HideToast();
+            CloseFlyout();
+            ClosePortPopup(false);
+            ScheduleResponsiveRelayout();
+            ScheduleScrollRecvToLatest();
+        };
+        DpiChanged += (_, _) => ScheduleScrollRecvToLatest();
+        Activated += (_, _) => ScheduleScrollRecvToLatest();
+        Move += (_, _) =>
+        {
+            HideToast();
+            CloseFlyout();
+            ClosePortPopup(false);
+            ScheduleScrollRecvToLatest();
+        };
         menu.MenuActivate += (_, _) => { CloseFlyout(); ClosePortPopup(false); };
 
         Controls.Add(root);
@@ -286,7 +314,7 @@ public sealed partial class MainForm : Form
         get
         {
             Version? version = typeof(MainForm).Assembly.GetName().Version;
-            return version is null ? "1.1.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+            return version is null ? "1.2.0" : $"{version.Major}.{version.Minor}.{version.Build}";
         }
     }
 
@@ -495,8 +523,8 @@ public sealed partial class MainForm : Form
         var help = new ToolStripMenuItem("帮助");
         help.DropDownItems.Add(new ToolStripMenuItem("关于", null, (_, _) =>
             MessageBox.Show(this,
-                $"SSCOM 重写版（C# / .NET Framework 4.8）\n版本 v{AppVersion}\n依据 sscom5.13.1-rewrite-spec.md 的行为规则实现。",
-                $"关于 SscomRe v{AppVersion}", MessageBoxButtons.OK, MessageBoxIcon.Information)));
+                $"串口/网络数据调试器(定制版)\n版本 v{AppVersion}\nC# / .NET Framework 4.8，依据 sscom5.13.1-rewrite-spec.md 的行为规则实现。",
+                $"关于 sscomRe v{AppVersion}", MessageBoxButtons.OK, MessageBoxIcon.Information)));
 
         menu.Items.AddRange(new ToolStripItem[] { comm, portCfg, display, send, multi, help });
         Theme.StyleMenu(menu);
@@ -563,6 +591,14 @@ public sealed partial class MainForm : Form
         Put(row, Lb("ms/次"));
         _newLineBox = Cb("加回车换行");
         Put(row, _newLineBox);
+        _autoScrollBox = Cb("自动滚动", true);
+        _rowTip.SetToolTip(_autoScrollBox, "接收日志自动滚动到最新内容");
+        _autoScrollBox.CheckedChanged += (_, _) =>
+        {
+            SyncFollowButton();
+            ScheduleScrollRecvToLatest();
+        };
+        Put(row, _autoScrollBox);
 
         row.MarkRightGroup();
         _recvSettingsButton = SettingButton("接收设置 ▾");
@@ -851,33 +887,222 @@ public sealed partial class MainForm : Form
 
     private int TextUnit() => Math.Max(7, TextRenderer.MeasureText("0", Font).Width);
 
-    /// <summary>多条字符串面板：顶部循环发送开关 + 3 页，每页 99 行（HEX/数据/点击发送/顺序/延时）。</summary>
+    /// <summary>多条字符串面板：标题/工具条/页签/表格卡/页脚，每页 99 行。</summary>
     private Control BuildMultiPanel()
     {
-        _multiPanel = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Width = Math.Max(400, _multiPanelWidth) };
+        int headerH = Math.Max(52, Theme.Scale(this, 56));
+        int toolsH = Math.Max(34, Theme.Scale(this, 36));
+        int pageBarH = Math.Max(34, Theme.Scale(this, 38));
+        int footerH = Math.Max(24, Theme.Scale(this, 26));
 
-        // 顶部条：循环发送、调宽按钮、导入 ini。三页共用。
-        int smallButton = Math.Max(26, Font.Height + 10);
-        int smallButtonH = Math.Max(22, Font.Height + 6);
-        var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(2), WrapContents = false, BackColor = Theme.Surface2 };
-        _loopSendBox = new ThemeCheckBox { Text = "循环发送", AutoSize = true, Padding = new Padding(2, 5, 6, 0) };
-        top.Controls.Add(_loopSendBox);
-        var minus = new ThemeButton { Text = "−", Width = smallButton, Height = smallButtonH, Margin = new Padding(2, 1, 0, 0), Kind = ThemeButton.ButtonKind.Icon };
-        minus.Click += (_, _) => AdjustMultiButtonWidth(-10);
-        var plus = new ThemeButton { Text = "＋", Width = smallButton, Height = smallButtonH, Margin = new Padding(2, 1, 0, 0), Kind = ThemeButton.ButtonKind.Icon };
-        plus.Click += (_, _) => AdjustMultiButtonWidth(+10);
-        top.Controls.Add(new Label { Text = "点击发送按钮宽度:", AutoSize = true, Padding = new Padding(6, 7, 0, 0), ForeColor = Theme.Muted, BackColor = Color.Transparent });
-        top.Controls.Add(minus);
-        top.Controls.Add(plus);
-        _importIniButton = new ThemeButton { Text = "导入ini", AutoSize = true, Margin = new Padding(8, 1, 0, 0) };
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Canvas,
+            ColumnCount = 1,
+            RowCount = 5,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        _multiPanel = root;
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, headerH));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, toolsH));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, pageBarH));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, footerH));
+        root.SuspendLayout();
+
+        // —— 标题栏：logo、标题、页数胶囊、导入 ——
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Surface,
+            ColumnCount = 3,
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(Theme.Scale(this, 12), Theme.Scale(this, 5), Theme.Scale(this, 10), Theme.Scale(this, 5)),
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        header.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Theme.BorderSoft, 1);
+            e.Graphics.DrawLine(pen, 0, header.Height - 1, header.Width, header.Height - 1);
+        };
+
+        var brand = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Surface,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        brand.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        brand.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        brand.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        int logoSize = Math.Max(26, Theme.Scale(this, 30));
+        var logo = new AppLogo
+        {
+            Width = logoSize,
+            Height = logoSize,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 0, Theme.Scale(this, 10), 0),
+        };
+        brand.Controls.Add(logo, 0, 0);
+
+        var titleBlock = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Margin = new Padding(0) };
+        _multiTitleLabel = new Label
+        {
+            Text = "多条字符串",
+            AutoSize = false,
+            AutoEllipsis = true,
+            ForeColor = Theme.Text,
+            Font = new Font(Font.FontFamily, Font.Size + 1.8F, FontStyle.Bold),
+            TextAlign = ContentAlignment.MiddleLeft,
+            BackColor = Color.Transparent,
+        };
+        _multiSubLabel = new Label
+        {
+            Text = "命令序列 · 每页 99 条",
+            AutoSize = false,
+            AutoEllipsis = true,
+            ForeColor = Theme.Muted,
+            Font = new Font(Font.FontFamily, Math.Max(7F, Font.Size - 0.5F)),
+            TextAlign = ContentAlignment.MiddleLeft,
+            BackColor = Color.Transparent,
+        };
+        titleBlock.Controls.Add(_multiTitleLabel);
+        titleBlock.Controls.Add(_multiSubLabel);
+        int titleH = Math.Max(18, Font.Height + 4);
+        int subH = Math.Max(14, Font.Height);
+        titleBlock.Resize += (_, _) =>
+        {
+            int top = Math.Max(0, (titleBlock.Height - titleH - subH) / 2);
+            _multiTitleLabel.SetBounds(0, top, titleBlock.Width, titleH);
+            _multiSubLabel.SetBounds(0, top + titleH, titleBlock.Width, subH);
+        };
+        brand.Controls.Add(titleBlock, 1, 0);
+        header.Controls.Add(brand, 0, 0);
+
+        _multiPageChip = new ThemeChip
+        {
+            Width = Theme.Scale(this, 96),
+            Height = Math.Max(22, Font.Height + 8),
+            Font = new Font(Font.FontFamily, Math.Max(7.5F, Font.Size - 0.5F)),
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(Theme.Scale(this, 6), 0, Theme.Scale(this, 8), 0),
+        };
+        header.Controls.Add(_multiPageChip, 1, 0);
+
+        _importIniButton = new ThemeButton
+        {
+            Text = "导入 ini",
+            AutoSize = true,
+            Kind = ThemeButton.ButtonKind.Default,
+            Anchor = AnchorStyles.Right,
+            Margin = new Padding(0),
+        };
         _importIniButton.Click += (_, _) => ImportIni();
-        top.Controls.Add(_importIniButton);
+        header.Controls.Add(_importIniButton, 2, 0);
+        root.Controls.Add(header, 0, 0);
+
+        // —— 工具条：循环开关、发送按钮宽度、顺序提示 ——
+        var tools = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Surface2,
+            ColumnCount = 1,
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(Theme.Scale(this, 12), 0, Theme.Scale(this, 12), 0),
+        };
+        tools.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        tools.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var toolLeft = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Surface2,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        _loopSendBox = new ThemeSwitch { Text = "循环发送", AutoSize = true, Margin = new Padding(0, 7, 8, 0) };
+        toolLeft.Controls.Add(_loopSendBox);
+        toolLeft.Controls.Add(new Panel
+        {
+            Width = 1,
+            Height = 16,
+            BackColor = Theme.BorderSoft,
+            Margin = new Padding(0, 10, 10, 0),
+        });
+        toolLeft.Controls.Add(new Label
+        {
+            Text = "发送按钮宽度",
+            AutoSize = true,
+            ForeColor = Theme.Muted,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 10, 2, 0),
+        });
+        int stepSize = Math.Max(22, Theme.Scale(this, 24));
+        var minus = new ThemeButton
+        {
+            Text = "−",
+            Width = stepSize,
+            Height = stepSize,
+            Kind = ThemeButton.ButtonKind.Icon,
+            Margin = new Padding(0, 6, 0, 0),
+        };
+        minus.Click += (_, _) => AdjustMultiButtonWidth(-10);
+        var plus = new ThemeButton
+        {
+            Text = "＋",
+            Width = stepSize,
+            Height = stepSize,
+            Kind = ThemeButton.ButtonKind.Icon,
+            Margin = new Padding(0, 6, 0, 0),
+        };
+        plus.Click += (_, _) => AdjustMultiButtonWidth(+10);
+        _multiWidthValue = new Label
+        {
+            Text = _multiBtnWidth.ToString(),
+            AutoSize = false,
+            Width = Theme.Scale(this, 36),
+            Height = stepSize,
+            Font = Theme.MonoFont(Math.Max(8F, Font.Size)),
+            ForeColor = Theme.Text,
+            TextAlign = ContentAlignment.MiddleCenter,
+            BackColor = Color.Transparent,
+            Margin = new Padding(2, 6, 2, 0),
+        };
+        toolLeft.Controls.Add(minus);
+        toolLeft.Controls.Add(_multiWidthValue);
+        toolLeft.Controls.Add(plus);
+        tools.Controls.Add(toolLeft, 0, 0);
+        root.Controls.Add(tools, 0, 1);
+
+        // —— 页签：胶囊分段；第 1 页无删除入口，页 2/3 可增删 ——
+        var pageBar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            WrapContents = false,
+            BackColor = Theme.Surface,
+            Margin = new Padding(0),
+            Padding = new Padding(Theme.Scale(this, 12), Theme.Scale(this, 3), Theme.Scale(this, 12), 0),
+        };
+        root.Controls.Add(pageBar, 0, 2);
 
         int contentH;
         using (var probe = new ThemeTextBox { Font = Font })
             contentH = probe.PreferredHeight;
-        int headerH = TextRenderer.MeasureText("字符串(双击注释)", Font).Height + 8;
-        int rowHeight = Math.Max(contentH, headerH) + 6;
+        int headerH2 = TextRenderer.MeasureText("字符串(双击注释)", Font).Height + 8;
+        int rowHeight = Math.Max(contentH, headerH2) + 8;
         int hexCol = Math.Max(36, TextRenderer.MeasureText("HEX", Font).Width + 16);
         int orderCol = Math.Max(48, TextRenderer.MeasureText("顺序", Font).Width + 16);
         int delayCol = Math.Max(64, Math.Max(
@@ -885,15 +1110,20 @@ public sealed partial class MainForm : Form
             TextRenderer.MeasureText("1000", Font).Width) + 18);
         int sendCol = Math.Max(_multiBtnWidth, TextRenderer.MeasureText("点击发送", Font).Width + 16);
 
-        var pageHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Canvas };
-        var pageBar = new FlowLayoutPanel
+        var cardHost = new Panel
         {
-            Dock = DockStyle.Top,
-            Height = LineHeight(),
-            WrapContents = false,
-            Padding = new Padding(0, 1, 0, 0),
-            BackColor = Theme.Surface2,
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Canvas,
+            Padding = new Padding(Theme.Scale(this, 10), Theme.Scale(this, 4), Theme.Scale(this, 10), Theme.Scale(this, 4)),
+            Margin = new Padding(0),
         };
+        var card = new CardPanel { Dock = DockStyle.Fill, Padding = new Padding(1), Margin = new Padding(0) };
+        var pageHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Margin = new Padding(0) };
+        card.Controls.Add(pageHost);
+        cardHost.Controls.Add(card);
+        root.Controls.Add(cardHost, 0, 3);
+
+        int tabH = Math.Max(26, Font.Height + 10);
         for (int page = 0; page < IniDocument.MultiPageCount; page++)
         {
             var grid = BuildMultiGrid(page, rowHeight, hexCol, orderCol, delayCol, sendCol);
@@ -902,7 +1132,7 @@ public sealed partial class MainForm : Form
             {
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
-                BackColor = Theme.Canvas,
+                BackColor = Theme.Surface,
                 Visible = page == 0,
             };
             scroll.Controls.Add(grid);
@@ -913,21 +1143,106 @@ public sealed partial class MainForm : Form
             {
                 Text = $"第{page + 1}页",
                 AutoSize = false,
-                Width = Math.Max(72, TextRenderer.MeasureText($"第{page + 1}页", Font).Width + Theme.Scale(this, 24)),
-                Height = Font.Height + 10,
-                Margin = new Padding(0, 0, 3, 0),
-                Kind = page == 0 ? ThemeButton.ButtonKind.Outline : ThemeButton.ButtonKind.Default,
+                Width = Math.Max(64, TextRenderer.MeasureText($"第{page + 1}页", Font).Width + Theme.Scale(this, 22)),
+                Height = tabH,
+                Margin = new Padding(0, 2, 2, 0),
+                Kind = page == 0 ? ThemeButton.ButtonKind.SegmentSelected : ThemeButton.ButtonKind.Segment,
             };
             int selected = page;
             tab.Click += (_, _) => SelectMultiPage(selected);
             pageBar.Controls.Add(tab);
             _multiTabs[page] = tab;
+
+            if (page > 0)
+            {
+                var close = new ThemeButton
+                {
+                    Text = "×",
+                    Kind = ThemeButton.ButtonKind.Icon,
+                    AutoSize = false,
+                    Width = tabH,
+                    Height = tabH,
+                    Margin = new Padding(0, 2, 4, 0),
+                };
+                close.Click += (_, _) => RequestRemoveMultiPage(selected);
+                _rowTip.SetToolTip(close, "删除本页");
+                pageBar.Controls.Add(close);
+                _multiCloseTabs[page] = close;
+            }
         }
 
-        _multiPanel.Controls.Add(pageHost);
-        _multiPanel.Controls.Add(pageBar);
-        _multiPanel.Controls.Add(top);
-        return _multiPanel;
+        _multiAddTab = new ThemeButton
+        {
+            Text = "＋",
+            Kind = ThemeButton.ButtonKind.Icon,
+            AutoSize = false,
+            Width = tabH,
+            Height = tabH,
+            Margin = new Padding(3, 2, 0, 0),
+        };
+        _multiAddTab.Click += (_, _) => AddMultiPage();
+        _rowTip.SetToolTip(_multiAddTab, "增加一页（最多 3 页）");
+        pageBar.Controls.Add(_multiAddTab);
+
+        // —— 页脚 ——
+        var footer = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Theme.Surface,
+            ColumnCount = 3,
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(Theme.Scale(this, 14), 0, Theme.Scale(this, 14), 0),
+        };
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        footer.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Theme.BorderSoft, 1);
+            e.Graphics.DrawLine(pen, 0, 0, footer.Width, 0);
+        };
+        _multiFooterPage = new Label
+        {
+            Text = "第 1 页",
+            AutoSize = true,
+            ForeColor = Theme.Accent,
+            Font = new Font(Font.FontFamily, Math.Max(7.5F, Font.Size - 0.5F), FontStyle.Bold),
+            BackColor = Color.Transparent,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 0, Theme.Scale(this, 8), 0),
+        };
+        _multiFooterHint = new Label
+        {
+            Text = "顺序 0 不发送 · 双击格子编辑注释",
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            AutoEllipsis = true,
+            ForeColor = Theme.Dim,
+            Font = new Font(Font.FontFamily, Math.Max(7F, Font.Size - 0.5F)),
+            TextAlign = ContentAlignment.MiddleLeft,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0),
+        };
+        _multiFooterCount = new Label
+        {
+            Text = "99 条 / 页",
+            AutoSize = true,
+            ForeColor = Theme.Muted,
+            Font = new Font(Font.FontFamily, Math.Max(7F, Font.Size - 0.5F)),
+            BackColor = Color.Transparent,
+            Anchor = AnchorStyles.Right,
+            Margin = new Padding(Theme.Scale(this, 8), 0, 0, 0),
+        };
+        footer.Controls.Add(_multiFooterPage, 0, 0);
+        footer.Controls.Add(_multiFooterHint, 1, 0);
+        footer.Controls.Add(_multiFooterCount, 2, 0);
+        root.Controls.Add(footer, 0, 4);
+
+        root.ResumeLayout(true);
+        SelectMultiPage(0);
+        return root;
     }
 
     /// <summary>一页 99 行。下标是页内行号加上 page×99，三页连成一张发送表。</summary>
@@ -944,18 +1259,33 @@ public sealed partial class MainForm : Form
             DelayColumnWidth = delayCol,
         };
         grid.SuspendLayout();
-        void AddHeader(string text, int col)
+        void AddHeader(string text, int col, string? tip = null)
         {
             var label = HeaderLabel(text);
             label.Tag = new Point(0, col);
+            label.MouseEnter += (_, _) => grid.SetHoverRow(0);
+            label.MouseLeave += (_, _) => grid.ClearHoverIfOutside();
+            if (tip is not null) _rowTip.SetToolTip(label, tip);
             grid.Controls.Add(label);
         }
         AddHeader("HEX", 0);
-        AddHeader("字符串(双击注释)", 1);
+        AddHeader("字符串", 1, "双击字符串格编辑注释");
         AddHeader("点击发送", 2);
         AddHeader("顺序", 3);
         AddHeader("延时ms", 4);
 
+        void Track(Control control, int displayRow)
+        {
+            control.MouseEnter += (_, _) => grid.SetHoverRow(displayRow);
+            control.MouseLeave += (_, _) => grid.ClearHoverIfOutside();
+            if (control is TextBox box)
+            {
+                box.Enter += (_, _) => grid.SetFocusCell(box);
+                box.Leave += (_, _) => grid.SetFocusCell(null);
+            }
+        }
+
+        Font mono = Theme.MonoFont(Math.Max(8F, Font.Size));
         int origin = page * IniDocument.MultiRowsPerPage;
         for (int k = 0; k < IniDocument.MultiRowsPerPage; k++)
         {
@@ -972,8 +1302,16 @@ public sealed partial class MainForm : Form
             cb.MouseUp += (_, _) => AutoSave();            // 规格：行 HEX 复选框 MouseUp 自动保存
             _rowHex[row] = cb;
             grid.Controls.Add(cb);
+            Track(cb, shown);
 
-            var data = new ThemeTextBox { Tag = new Point(k + 1, 1) };
+            var data = new ThemeTextBox
+            {
+                Tag = new Point(k + 1, 1),
+                BorderStyle = BorderStyle.None,
+                Font = mono,
+                BackColor = Theme.Field,
+                ForeColor = Theme.Text,
+            };
             data.KeyPress += (_, e) =>
             {
                 if (e.KeyChar == (char)1) { data.SelectAll(); e.Handled = true; }   // Ctrl+A 全选
@@ -982,18 +1320,30 @@ public sealed partial class MainForm : Form
             data.DoubleClick += (_, _) => EditRowComment(row);
             _rowData[row] = data;
             grid.Controls.Add(data);
+            Track(data, shown);
 
             var send = new ThemeButton
             {
                 Text = shown.ToString(),
                 Tag = new Point(k + 1, 2),
+                Kind = ThemeButton.ButtonKind.Soft,
                 Padding = new Padding(2, 0, 2, 0),
             };
             send.Click += (_, _) => SendRow(row);
             _rowSend[row] = send;
             grid.Controls.Add(send);
+            Track(send, shown);
 
-            var order = new ThemeTextBox { Text = "0", Tag = new Point(k + 1, 3) };
+            var order = new ThemeTextBox
+            {
+                Text = "0",
+                Tag = new Point(k + 1, 3),
+                BorderStyle = BorderStyle.None,
+                Font = mono,
+                TextAlign = HorizontalAlignment.Right,
+                BackColor = Theme.Field,
+                ForeColor = Theme.Text,
+            };
             _rowTip.SetToolTip(order, "自动发送时按顺序号从小到大,0不发送");
             order.KeyUp += (_, _) =>
             {
@@ -1007,8 +1357,18 @@ public sealed partial class MainForm : Form
             };
             _rowOrder[row] = order;
             grid.Controls.Add(order);
+            Track(order, shown);
 
-            var time = new ThemeTextBox { Text = "1000", Tag = new Point(k + 1, 4) };
+            var time = new ThemeTextBox
+            {
+                Text = "1000",
+                Tag = new Point(k + 1, 4),
+                BorderStyle = BorderStyle.None,
+                Font = mono,
+                TextAlign = HorizontalAlignment.Right,
+                BackColor = Theme.Field,
+                ForeColor = Theme.Text,
+            };
             time.KeyUp += (_, _) =>
             {
                 var (t, c) = InputNormalizer.NormalizeInt(time.Text, time.SelectionStart, 1000, 1, 99999);
@@ -1021,11 +1381,14 @@ public sealed partial class MainForm : Form
             };
             _rowTime[row] = time;
             grid.Controls.Add(time);
+            Track(time, shown);
 
             _rowComments[row] = shown.ToString();          // 注释默认行号（按钮面板与提示同源）
             _rowTip.SetToolTip(data, _rowComments[row]);
         }
 
+        grid.MouseMove += (_, e) => grid.SetHoverRowFromPoint(e.Location);
+        grid.MouseLeave += (_, _) => grid.ClearHoverIfOutside();
         grid.ResumeLayout(false);
         return grid;
     }
@@ -1038,7 +1401,7 @@ public sealed partial class MainForm : Form
         TextAlign = ContentAlignment.MiddleLeft,
         Padding = new Padding(2, 0, 2, 0),
         ForeColor = Theme.Muted,
-        BackColor = Theme.Surface2,
+        BackColor = Color.Transparent,
     };
 
     /// <summary>滚动区双缓冲，减少多行面板展开/滚动时的闪烁。</summary>
@@ -1050,6 +1413,57 @@ public sealed partial class MainForm : Form
         {
             base.OnHandleCreated(e);
             Theme.TryDarkNative(Handle);
+        }
+    }
+
+    /// <summary>多条面板的圆角表格卡。</summary>
+    private sealed class CardPanel : Panel
+    {
+        public CardPanel()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Surface;
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            using var back = new SolidBrush(Theme.Canvas);
+            e.Graphics.FillRectangle(back, ClientRectangle);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var bounds = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
+            using GraphicsPath path = Theme.RoundedRect(bounds, Theme.Scale(this, 12));
+            using (var fill = new SolidBrush(Theme.Surface))
+                g.FillPath(fill, path);
+            using var pen = new Pen(Theme.BorderSoft, 1);
+            g.DrawPath(pen, path);
+        }
+    }
+
+    /// <summary>标题栏里的 exe 图标。</summary>
+    private sealed class AppLogo : Control
+    {
+        public AppLogo()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw |
+                     ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            Theme.FillBackground(g, this);
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+            Rectangle target = new(0, 0, Math.Max(1, Width), Math.Max(1, Height));
+            g.DrawImage(Theme.AppIconBitmap, target);
         }
     }
 
@@ -1066,6 +1480,8 @@ public sealed partial class MainForm : Form
         public int DelayColumnWidth { get; set; } = 72;
 
         private int _layouting;
+        private int _hoverRow = -1;
+        private Control? _focusCell;
 
         public MultiRowsPanel()
         {
@@ -1073,18 +1489,109 @@ public sealed partial class MainForm : Form
             BackColor = Theme.Surface;
         }
 
+        public void SetHoverRow(int row)
+        {
+            if (_hoverRow == row) return;
+            int old = _hoverRow;
+            _hoverRow = row;
+            InvalidateRow(old);
+            InvalidateRow(row);
+        }
+
+        public void SetHoverRowFromPoint(Point point)
+        {
+            int row = RowHeight <= 0 ? -1 : point.Y / RowHeight;
+            SetHoverRow(row is >= 1 and <= 99 ? row : -1);
+        }
+
+        public void ClearHoverIfOutside()
+        {
+            if (!ClientRectangle.Contains(PointToClient(Cursor.Position))) SetHoverRow(-1);
+        }
+
+        public void SetFocusCell(Control? cell)
+        {
+            if (ReferenceEquals(_focusCell, cell)) return;
+            Control? old = _focusCell;
+            _focusCell = cell;
+            InvalidateCell(old);
+            InvalidateCell(cell);
+        }
+
+        private void InvalidateRow(int row)
+        {
+            if (row is < 1 or > 99 || RowHeight <= 0) return;
+            Invalidate(new Rectangle(0, row * RowHeight, Width, RowHeight));
+        }
+
+        private void InvalidateCell(Control? cell)
+        {
+            if (cell is null || cell.IsDisposed) return;
+            Invalidate(Rectangle.Inflate(cell.Bounds, 5, 5));
+        }
+
         protected override void OnPaintBackground(PaintEventArgs e)
         {
+            Graphics g = e.Graphics;
+            Rectangle clip = e.ClipRectangle;
+            int rh = Math.Max(1, RowHeight);
+            int headerH = Math.Min(rh, Height);
             using (var back = new SolidBrush(Theme.Surface))
-                e.Graphics.FillRectangle(back, ClientRectangle);
+                g.FillRectangle(back, ClientRectangle);
             using (var header = new SolidBrush(Theme.Surface2))
-                e.Graphics.FillRectangle(header, 0, 0, Width, Math.Min(RowHeight, Height));
-            using var line = new Pen(Theme.WithAlpha(28, Theme.Border));
-            for (int row = 1; row <= 99; row++)
+                g.FillRectangle(header, 0, 0, Width, headerH);
+
+            Color stripe = Theme.Mix(Theme.Surface, Theme.Surface2, Theme.IsLight ? 0.36F : 0.28F);
+            int first = Math.Max(1, clip.Top / rh);
+            int last = Math.Min(99, clip.Bottom / rh + 1);
+            for (int row = first; row <= last; row++)
             {
-                int y = row * RowHeight - 1;
-                if (y >= 0 && y < Height)
-                    e.Graphics.DrawLine(line, 0, y, Width, y);
+                int y = row * rh;
+                if (row % 2 == 0)
+                {
+                    using var fill = new SolidBrush(stripe);
+                    g.FillRectangle(fill, 0, y, Width, rh);
+                }
+                if (row == _hoverRow)
+                {
+                    using var fill = new SolidBrush(Theme.WithAlpha(Theme.IsLight ? 14 : 20, Theme.Accent));
+                    g.FillRectangle(fill, 0, y, Width, rh);
+                    using var bar = new SolidBrush(Theme.WithAlpha(180, Theme.Accent));
+                    g.FillRectangle(bar, 0, y + 5, Math.Max(1, Theme.Scale(this, 2)), Math.Max(1, rh - 10));
+                }
+            }
+
+            using (var line = new Pen(Theme.WithAlpha(26, Theme.Border)))
+            {
+                for (int row = first; row <= last; row++)
+                {
+                    int y = row * rh - 1;
+                    if (y >= clip.Top && y <= clip.Bottom)
+                        g.DrawLine(line, 0, y, Width, y);
+                }
+            }
+            if (headerH > 0)
+            {
+                using var headerLine = new Pen(Theme.BorderSoft);
+                g.DrawLine(headerLine, 0, headerH - 1, Width, headerH - 1);
+                using var accent = new SolidBrush(Theme.WithAlpha(150, Theme.Accent));
+                g.FillRectangle(accent, HexColumnWidth + 4, Math.Max(0, headerH - 3),
+                    Math.Max(8, Theme.Scale(this, 16)), Math.Max(1, Theme.Scale(this, 2)));
+            }
+
+            foreach (Control c in Controls)
+            {
+                if (c is not TextBox || c.Tag is not Point cell || cell.Y is not (1 or 3 or 4)) continue;
+                if (!c.Visible) continue;
+                Rectangle field = Rectangle.Inflate(c.Bounds, 2, 2);
+                if (!clip.IntersectsWith(field)) continue;
+                using GraphicsPath path = Theme.RoundedRect(field, Theme.Scale(this, 7));
+                using (var fill = new SolidBrush(Theme.Field))
+                    g.FillPath(fill, path);
+                bool focused = ReferenceEquals(c, _focusCell);
+                using var pen = new Pen(focused ? Theme.AccentBright : Theme.BorderSoft,
+                    focused ? Math.Max(2, Theme.Scale(this, 2)) : 1);
+                g.DrawPath(pen, path);
             }
         }
 
@@ -1109,7 +1616,7 @@ public sealed partial class MainForm : Form
                         headerH = Math.Max(headerH, TextRenderer.MeasureText(c.Text, Font).Height + 8);
                 }
                 int buttonH = Math.Max(textH, Font.Height + 10);
-                int rowHeight = Math.Max(Math.Max(textH, buttonH), headerH) + 6;
+                int rowHeight = Math.Max(Math.Max(textH, buttonH), headerH) + 8;
                 RowHeight = rowHeight;
                 int wanted = rowHeight * 100;
                 if (Height != wanted) Height = wanted;
@@ -1141,7 +1648,7 @@ public sealed partial class MainForm : Form
                     if (c is Label)
                     {
                         // 表头限制在本列里，不再按文字宽度伸到旁边的栏目上。
-                        c.SetBounds(x + 1, y, Math.Max(1, colWidth - 2), rowHeight);
+                        c.SetBounds(x + 3, y, Math.Max(1, colWidth - 6), rowHeight);
                         continue;
                     }
                     if (col == 0 && c is CheckBox)
@@ -1152,7 +1659,8 @@ public sealed partial class MainForm : Form
                             y + Math.Max(0, (rowHeight - boxH) / 2), boxWidth, boxH);
                         continue;
                     }
-                    int w = Math.Max(1, colWidth - 2);
+                    bool textField = c is TextBox;
+                    int w = Math.Max(1, colWidth - (textField ? 6 : 4));
                     int h = c switch
                     {
                         TextBox box => box.PreferredHeight,
@@ -1160,7 +1668,7 @@ public sealed partial class MainForm : Form
                         _ => c.Height,
                     };
                     h = Math.Min(h, rowHeight - 4);
-                    c.SetBounds(x + 1, y + Math.Max(0, (rowHeight - h) / 2), w, h);
+                    c.SetBounds(x + (textField ? 3 : 2), y + Math.Max(0, (rowHeight - h) / 2), w, h);
                 }
             }
             finally
@@ -1253,7 +1761,7 @@ public sealed partial class MainForm : Form
         _recvToFileBox.CheckedChanged += (_, _) => RefreshRecvSnapshot();
         _timeoutEdit.TextChanged += (_, _) => RefreshRecvSnapshot();
         _portCombo.TextChanged += (_, _) => DetectMode();     // 下拉文本变化 → 重探模式（面板/定时器联动）
-        _portField.PickerRequested += (_, _) => TogglePortPopup();
+        _portField.PickerRequested += (_, _) => TogglePortPopup(_portField);
         _portField.ManualTextCommitted += CommitManualPort;
         _net.ReadyChanged += () => Post(UpdateStatus);
         _net.DataReceived += OnNetData;
@@ -1365,8 +1873,7 @@ public sealed partial class MainForm : Form
     }
 
     /// <summary>
-    /// 追加接收内容：用户在底部时跟随滚动；向上翻看历史或正在输入时保持原光标/滚动位置，
-    /// 不再像 AppendText 后强制 SelectionStart 那样把视图拽回末尾。
+    /// 追加接收内容：勾选“自动滚动”时始终显示最新内容；取消勾选才保留当前光标/滚动位置。
     /// </summary>
     private void AppendRecv(string text)
     {
@@ -1377,7 +1884,6 @@ public sealed partial class MainForm : Form
             return;
         }
 
-        bool atBottom = RecvAtBottom();
         int selStart = _recvBox.SelectionStart;
         int selLen = _recvBox.SelectionLength;
         Point scroll = GetRecvScroll();
@@ -1394,11 +1900,9 @@ public sealed partial class MainForm : Form
             _recvBox.Invalidate();
         }
 
-        if (_autoFollow && atBottom)
+        if (_autoScrollBox.Checked)
         {
-            _recvBox.SelectionStart = _recvBox.TextLength;
-            _recvBox.SelectionLength = 0;
-            _recvBox.ScrollToCaret();
+            ScrollRecvToLatest();
         }
         else
         {
@@ -1966,6 +2470,7 @@ public sealed partial class MainForm : Form
     {
         _multiBtnWidth = Fx.Clamp(_multiBtnWidth + delta, 20, 400);
         ApplySendColumnWidth();
+        UpdateMultiWidthLabel();
         AutoSave();
     }
 
@@ -1985,6 +2490,7 @@ public sealed partial class MainForm : Form
         _rowComments[row] = result;
         _rowSend[row].Text = result;
         _rowTip.SetToolTip(_rowData[row], result);
+        StyleSendButton(row);
         AutoSave();
     }
 
@@ -2040,6 +2546,7 @@ public sealed partial class MainForm : Form
         else
         {
             _multiTimer.Stop();
+            ClearMultiSendHighlight();
         }
     }
 
@@ -2073,12 +2580,12 @@ public sealed partial class MainForm : Form
                 for (int k = 0; k < _rowSend.Length; k++)
                 {
                     if (_rowSend[k] is not ThemeButton button) continue;
-                    button.Kind = ThemeButton.ButtonKind.Default;
+                    button.Kind = ThemeButton.ButtonKind.Soft;
                     button.Invalidate();
                 }
                 if (_rowSend[step.Row] is ThemeButton active)
                 {
-                    active.Kind = ThemeButton.ButtonKind.Outline;   // 当前发送行高亮
+                    active.Kind = ThemeButton.ButtonKind.SegmentSelected;   // 当前发送行高亮
                     active.Invalidate();
                 }
                 return;
@@ -2444,28 +2951,173 @@ public sealed partial class MainForm : Form
 
     private void SelectMultiPage(int page)
     {
+        if (_multiPageCount <= 0) return;
+        _multiPage = Fx.Clamp(page, 0, _multiPageCount - 1);
         for (int i = 0; i < IniDocument.MultiPageCount; i++)
         {
-            if (_multiPages[i] is not null) _multiPages[i].Visible = i == page;
+            bool exists = i < _multiPageCount;
             if (_multiTabs[i] is not null)
             {
-                _multiTabs[i].Kind = i == page ? ThemeButton.ButtonKind.Outline : ThemeButton.ButtonKind.Default;
+                _multiTabs[i].Visible = exists;
+                _multiTabs[i].Kind = i == _multiPage
+                    ? ThemeButton.ButtonKind.SegmentSelected
+                    : ThemeButton.ButtonKind.Segment;
                 _multiTabs[i].Invalidate();
             }
+            if (_multiCloseTabs[i] is not null) _multiCloseTabs[i]!.Visible = exists;
+            if (_multiPages[i] is not null) _multiPages[i].Visible = exists && i == _multiPage;
         }
-        _multiPages[page]?.BringToFront();
+        if (_multiAddTab is not null) _multiAddTab.Enabled = _multiPageCount < IniDocument.MultiPageCount;
+        _multiPages[_multiPage]?.BringToFront();
+        UpdateMultiPageChrome();
     }
+
+    private void UpdateMultiPageChrome()
+    {
+        if (_multiPageChip is null) return;
+        string label = $"{_multiPage + 1} / {_multiPageCount}";
+        _multiPageChip.Text = label;
+        _multiPageChip.Width = Math.Max(Theme.Scale(this, 48),
+            TextRenderer.MeasureText(label, _multiPageChip.Font, new Size(int.MaxValue, int.MaxValue),
+                TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width + Theme.Scale(this, 22));
+        _multiPageChip.Invalidate();
+        if (_multiFooterPage is not null) _multiFooterPage.Text = $"第 {_multiPage + 1} 页";
+    }
+
+    private void UpdateMultiWidthLabel()
+    {
+        if (_multiWidthValue is not null) _multiWidthValue.Text = _multiBtnWidth.ToString();
+    }
+
+    private void ApplyMultiTheme()
+    {
+        if (_multiTitleLabel is not null) _multiTitleLabel.ForeColor = Theme.Text;
+        if (_multiSubLabel is not null) _multiSubLabel.ForeColor = Theme.Muted;
+        if (_multiWidthValue is not null) _multiWidthValue.ForeColor = Theme.Text;
+        if (_multiFooterPage is not null) _multiFooterPage.ForeColor = Theme.Accent;
+        if (_multiFooterHint is not null) _multiFooterHint.ForeColor = Theme.Dim;
+        if (_multiFooterCount is not null) _multiFooterCount.ForeColor = Theme.Muted;
+        _multiPageChip?.Invalidate();
+        foreach (var grid in _multiGrids) grid?.Invalidate();
+    }
+
+    private void AddMultiPage()
+    {
+        if (_multiPageCount >= IniDocument.MultiPageCount) return;
+        _multiPageCount++;
+        SelectMultiPage(_multiPageCount - 1);
+        AutoSave();
+    }
+
+    private void RequestRemoveMultiPage(int page)
+    {
+        if (page <= 0 || page >= _multiPageCount) return;
+        string shift = page < _multiPageCount - 1 ? "\n后面的页会依次前移。" : "";
+        DialogResult answer = MessageBox.Show(this,
+            $"删除第{page + 1}页？\n\n该页 99 行的内容将被清除。{shift}\n\n此操作不可撤销。",
+            "删除本页", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+        if (answer == DialogResult.Yes) RemoveMultiPage(page);
+    }
+
+    private void RemoveMultiPage(int page)
+    {
+        if (page <= 0 || page >= _multiPageCount) return;
+        if (_loopSendBox.Checked) _loopSendBox.Checked = false;
+        _loopOrder.Clear();
+        ClearMultiSendHighlight();
+
+        int last = _multiPageCount - 1;
+        for (int p = page; p < last; p++) CopyMultiPage(p + 1, p);
+        ClearMultiPage(last);
+        _multiPageCount--;
+        int selected = _multiPage > page ? _multiPage - 1 : _multiPage;
+        SelectMultiPage(Math.Min(selected, _multiPageCount - 1));
+        AutoSave();
+    }
+
+    private void CopyMultiPage(int fromPage, int toPage)
+    {
+        int from = fromPage * IniDocument.MultiRowsPerPage;
+        int to = toPage * IniDocument.MultiRowsPerPage;
+        for (int k = 0; k < IniDocument.MultiRowsPerPage; k++)
+        {
+            int src = from + k, dst = to + k;
+            _rowOrder[dst].Text = _rowOrder[src].Text;
+            _rowTime[dst].Text = _rowTime[src].Text;
+            _rowHex[dst].Checked = _rowHex[src].Checked;
+            _rowData[dst].Text = _rowData[src].Text;
+            _rowComments[dst] = _rowComments[src];
+            _rowSend[dst].Text = _rowSend[src].Text;
+            _rowTip.SetToolTip(_rowData[dst], _rowComments[dst]);
+            StyleSendButton(dst);
+        }
+    }
+
+    private void ClearMultiPage(int page)
+    {
+        int origin = page * IniDocument.MultiRowsPerPage;
+        for (int k = 0; k < IniDocument.MultiRowsPerPage; k++)
+        {
+            int row = origin + k;
+            string shown = (k + 1).ToString();
+            _rowOrder[row].Text = "0";
+            _rowTime[row].Text = "1000";
+            _rowHex[row].Checked = false;
+            _rowData[row].Text = "";
+            _rowComments[row] = shown;
+            _rowSend[row].Text = shown;
+            _rowTip.SetToolTip(_rowData[row], shown);
+            StyleSendButton(row);
+        }
+    }
+
+    private void StyleSendButton(int row)
+    {
+        if (_rowSend[row] is not ThemeButton button) return;
+        int shown = row % IniDocument.MultiRowsPerPage + 1;
+        button.AccentText = _rowComments[row].Length > 0 && _rowComments[row] != shown.ToString();
+        if (button.Kind is ThemeButton.ButtonKind.Default or ThemeButton.ButtonKind.Outline)
+            button.Kind = ThemeButton.ButtonKind.Soft;
+        button.Invalidate();
+    }
+
+    private void ClearMultiSendHighlight()
+    {
+        foreach (var button in _rowSend)
+        {
+            if (button is not ThemeButton theme || theme.Kind == ThemeButton.ButtonKind.Soft) continue;
+            theme.Kind = ThemeButton.ButtonKind.Soft;
+            theme.Invalidate();
+        }
+    }
+
+    internal int MultiPageCountForTest => _multiPageCount;
+    internal int MultiPageSelectedForTest => _multiPage;
+    internal bool MultiPageVisibleForTest(int page) =>
+        page >= 0 && page < IniDocument.MultiPageCount && _multiPages[page] is { Visible: true };
+    internal bool MultiPageCloseVisibleForTest(int page) =>
+        page >= 0 && page < IniDocument.MultiPageCount && _multiCloseTabs[page] is { Visible: true };
+    internal void SetMultiPageCountForTest(int count)
+    {
+        _multiPageCount = Fx.Clamp(count, 1, IniDocument.MultiPageCount);
+        SelectMultiPage(0);
+    }
+    internal void AddMultiPageForTest() => AddMultiPage();
+    internal void RemoveMultiPageForTest(int page) => RemoveMultiPage(page);
+    internal void SetMultiPageDataForTest(int page, int row, string text) =>
+        _rowData[page * IniDocument.MultiRowsPerPage + row].Text = text;
+    internal string MultiPageDataForTest(int page, int row) =>
+        _rowData[page * IniDocument.MultiRowsPerPage + row].Text;
 
     private void ToggleMultiPanel()
     {
         CloseFlyout();
-        _prewarmTimer.Stop();
-        _prewarmQueue.Clear();
+        // 页 2/3 默认隐藏，首次显示前仍需建句柄；不要因展开面板而中断预热。
         // 规格：切换多条面板；标题在 显示态=隐藏 / 隐藏态=扩展 之间切换。
         bool show = _split.Panel2Collapsed;
         _hideToggleButton.Text = show ? "隐藏" : "扩展";
         bool freezeLog = _recvBox is { IsHandleCreated: true };
-        bool followBottom = freezeLog && _autoFollow && RecvAtBottom();
+        bool followBottom = freezeLog && _autoScrollBox.Checked;
         Point scroll = freezeLog ? GetRecvScroll() : Point.Empty;
         if (freezeLog) SendMessage(_recvBox.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
         // 一次性完成展开/收起；拖动分割线不由这里触发。
@@ -2560,6 +3212,7 @@ public sealed partial class MainForm : Form
         RenderLogAll();
         StatusTick();
         UpdateStatus();
+        ApplyMultiTheme();
     }
 
     /// <summary>下拉里可能带“COM38 · USB 串行设备”描述，逻辑和 ini 只用端口名。</summary>
@@ -2585,8 +3238,7 @@ public sealed partial class MainForm : Form
             int baud = ComPortService.BaudValueOf(_baudCombo.SelectedIndex, _port.CustomBaud);
             string baudText = _baudCombo.SelectedIndex <= 0 ? baud.ToString() : _baudCombo.Text;
             _connStatus.Text = $"{portName}{state}{baudText}bps,{_port.LineDescription()}";
-            if (_logTitleLabel is not null)
-                _logTitleLabel.Text = portName.Length > 0 ? portName : "未选择端口";
+            _logPortPicker?.SetDisplay(portName.Length > 0 ? portName : "未选择端口");
             if (_logSubLabel is not null)
                 _logSubLabel.Text = $"{baudText}bps · {_port.LineDescription()}";
             _sideStatusCard?.SetStatus(open, open ? "已打开" : "未打开",
@@ -2597,7 +3249,7 @@ public sealed partial class MainForm : Form
         {
             // 规格：网络模式面板 3 是整个全局串 0x4ED538（下拉文本 + 本机 IP 文本）
             _connStatus.Text = $"{_portCombo.Text} {_localIpCombo.Text}  {(_net.Ready ? "已连接" : "未连接")}";
-            if (_logTitleLabel is not null) _logTitleLabel.Text = _portCombo.Text;
+            _logPortPicker?.SetDisplay(_portCombo.Text);
             if (_logSubLabel is not null)
                 _logSubLabel.Text = $"{_remoteIpBox.Text}:{_remotePortBox.Text} · {(_net.Ready ? "已连接" : "未连接")}";
             _sideStatusCard?.SetStatus(_net.Ready, _net.Ready ? "已连接" : "未连接",
@@ -2895,6 +3547,7 @@ public sealed partial class MainForm : Form
             HexSend = _hexSendBox.Checked,
             TimerInterval = _timerIntervalEdit.Text,
             AddCrLf = _newLineBox.Checked,
+            AutoScroll = _autoScrollBox.Checked,
             HexDisplay = _hexDisplayBox.Checked,
             VerifyMode = Math.Max(0, _verifyBox.SelectedIndex),
             Dtr = _dtrBox.Checked,
@@ -2927,6 +3580,7 @@ public sealed partial class MainForm : Form
             FormTop = savedBounds.Top,
             MultiPanelWidth = _multiPanelWidth,
             MultiButtonWidth = _multiBtnWidth,
+            MultiPageCount = _multiPageCount,
             FontName = _recvBox.Font.Name,
             FontSize = _recvBox.Font.Size.ToString(System.Globalization.CultureInfo.InvariantCulture),
             FontStyle = (int)_recvBox.Font.Style,
@@ -2966,7 +3620,10 @@ public sealed partial class MainForm : Form
                 _rowTime[i].Text = snap.Delay[i];
                 _rowHex[i].Checked = snap.Hex[i];
                 _rowData[i].Text = snap.Data[i];
+                StyleSendButton(i);
             }
+            _multiPageCount = Fx.Clamp(snap.MultiPageCount, 1, IniDocument.MultiPageCount);
+            SelectMultiPage(0);
 
             _sendFileDelay = snap.SendFileDelayMs;
             foreach (var it in _sendFileItems)
@@ -2984,6 +3641,7 @@ public sealed partial class MainForm : Form
             _sendBox.Text = snap.HexSend ? snap.HexText : snap.AscText;
             _timerIntervalEdit.Text = snap.TimerInterval;
             _newLineBox.Checked = snap.AddCrLf;
+            _autoScrollBox.Checked = snap.AutoScroll;
             _hexDisplayBox.Checked = snap.HexDisplay;
             _verifyBox.SelectedIndex = Fx.Clamp(snap.VerifyMode, 0, _verifyBox.Items.Count - 1);
             _dtrBox.Checked = snap.Dtr;
@@ -3144,6 +3802,7 @@ public sealed partial class MainForm : Form
     private void ApplySendColumnWidth()
     {
         int width = Fx.Clamp(_multiBtnWidth, 20, 400);
+        UpdateMultiWidthLabel();
         foreach (MultiRowsPanel grid in _multiGrids)
         {
             if (grid is null) continue;

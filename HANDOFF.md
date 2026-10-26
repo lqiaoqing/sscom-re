@@ -1,14 +1,14 @@
-# 交接文档：SscomRe（SSCOM 5.13.1 的 C# 重写）
+# 交接文档：sscomRe（串口/网络数据调试器 定制版）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前版本 **v1.1.0**（2026-10-26），版本记录见 [CHANGELOG.md](CHANGELOG.md)。
-> 当前状态（2026-10-26）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏 + 日志头伸缩开关、Phase 3B 设置浮层、Phase 3C RTF 日志性能/即时面板/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、日志自动跟随、发送设置重排、125% DPI 对话框排版已落地；`--selftest` 230/230 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前版本 **v1.2.0**（2026-10-26），版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态（2026-10-26）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏 + 日志头伸缩开关、Phase 3B 设置浮层、Phase 3C RTF 日志性能/即时面板/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、日志自动跟随、发送设置重排、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动始终跟随、日志头端口快捷下拉、多条面板方案 02 已落地；`--selftest` 265/265 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
 ## 1. 项目是什么
 
-把 `sscom5.13.1.exe`（Delphi/VCL 串口调试工具）按逆向整理出的行为规格，用 **C# WinForms / .NET Framework 4.8** 重写成 `SscomRe`。工作目录：`D:\QWorkspace\Projects\Tools\sscom-re`。
+把 `sscom5.13.1.exe`（Delphi/VCL 串口调试工具）按逆向整理出的行为规格，用 **C# WinForms / .NET Framework 4.8** 重写成 `sscomRe` 定制版。工作目录：`D:\Work\workspace\sscom-re`。
 
 **硬约束（用户明确要求）：**
 
@@ -31,6 +31,7 @@ HANDOFF.md                   本文件
 REWRITE-PLAN.md              里程碑 M1–M9 状态
 _analysis/                   逆向脚本与产物（见 §8，不含原程序）
 SscomRe/                     工程（.NET Framework 4.8 WinForms）
+  Assets/sscomRe.ico    程序/exe 多尺寸图标
   Program.cs            入口；--selftest；全局异常→crash.log
   MainForm.cs           主窗体（约 3000 行）：菜单、收发编排、ini
   MainForm.Phase2.cs    三栏工作区、连接栏（自绘端口字段/浮层）、日志头、composer 布局
@@ -55,11 +56,13 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   Checksums.cs          校验模式 1–7
   TerminalInput.cs      终端按键纯逻辑（缓冲、吞键、发送计数）
   MultiSendPlanner.cs   多条发送状态机（纯逻辑）
-  IniDocument.cs        sscom51.ini 读写（三页 297 行 + 设置键）
+  IniDocument.cs        sscom51.ini 读写（1–3 页最多 297 行 + 设置键）
   PortSettingsDialog.cs 自建「更多串口设置」对话框
   WindowPlacement.cs    N1082–N1085 窗口几何夹取
   InputNormalizer.cs    行内数字框归一化（光标规则）
-  SelfTest.cs           --selftest 用例（当前 230 项）
+  LogPortPicker.cs      日志头端口快捷下拉（复用端口浮层）
+  ThemeSwitch.cs        开关式复选框（循环发送）
+  SelfTest.cs           --selftest 用例（当前 265 项）
 ```
 
 ---
@@ -72,7 +75,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 | M2 发送组包/校验/回显 | ✅ 自检全过 |
 | M3 接收显示/文件功能 | ✅ 实机+自检 |
 | M4 定时发送/发送文件/状态栏联动 | ✅ 已建 |
-| M5 多条字符串 297 行（3 页） | ✅ 已建 |
+| M5 多条字符串 297 行（默认 1 页，可增至 3 页） | ✅ 已建 |
 | M6 网络 TCP/UDP/模式联动/端口菜单 | ✅ 回环测试 |
 | M7 终端仿真 + 更多串口设置 | ✅ 已建；按键顺序/退格/吞键/GBK 各有自检 |
 | M8 sscom51.ini 保存/导入 | ✅ 已建；含往返与旧格式兼容自检 |
@@ -86,7 +89,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `SscomRe.exe --selftest` → `pass=230 fail=0`
+- `sscomRe_v1.2.0.exe --selftest` → `pass=265 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境有 COM38/COM39，只做了接收、换口和侧栏伸缩冒烟；DTR/RTS、发送文件、定时发送与真实网口仍需在目标硬件复验
 
@@ -97,23 +100,23 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 ```bash
 cd SscomRe
 dotnet build -c Release
-# 输出固定为 SscomRe/bin/net48/SscomRe.exe（csproj 固定 OutputPath）
+# 输出固定为 SscomRe/bin/net48/sscomRe_v1.2.0.exe（csproj 固定 OutputPath + AssemblyName）
 
 cd bin/net48
-./SscomRe.exe --selftest          # 必须 pass=230 fail=0
-./SscomRe.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
+./sscomRe_v1.2.0.exe --selftest          # 必须 pass=265 fail=0
+./sscomRe_v1.2.0.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
 
 # 冒烟：跑 ≥5 秒，检查没崩
 rm -f crash.log
-(./SscomRe.exe &) && sleep 5
+(./sscomRe_v1.2.0.exe &) && sleep 5
 ls crash.log && echo "崩了，看日志" || echo "正常"
-taskkill //IM SscomRe.exe //F
+taskkill //IM sscomRe_v1.2.0.exe //F
 ```
 
 **约定：**
 
 - `sscom51.ini` 按**当前工作目录**读写；自检和冒烟务必在 `bin/net48` 下启动。自检会自动备份/恢复现有 ini，避免测试字体、模式、窗口几何污染用户配置。
-- 不要杀用户正在用的窗口；编译报 `MSB3027/文件被锁定` 说明 `bin/net48/SscomRe.exe` 正在运行，先关闭再编译，不要用 `-o` 另开目录。
+- 不要杀用户正在用的窗口；编译报 `MSB3027/文件被锁定` 说明 `bin/net48/sscomRe_v1.2.0.exe` 正在运行，先关闭再编译，不要用 `-o` 另开目录。
 - 任何未处理异常都会写 exe 同目录的 `crash.log`，先看它。
 - 新增逻辑尽量抽成**纯类**（如 `Checksums`、`TerminalInput`、`MultiSendPlanner`）并在 `--selftest` 加用例；网络类可写本机回环测试。
 - 每次改动跑：build → selftest → 5 秒冒烟，三步都过再汇报。
@@ -140,6 +143,8 @@ taskkill //IM SscomRe.exe //F
 
 - `IniDocument` 只负责文本 ↔ `IniSnapshot`；`MainForm.CaptureSnapshot/ApplySnapshot` 负责控件 ↔ 快照。
 - `N<k>`/`N<100+k>` 第 1 页；第 2 页 `N201–N299`/`N301–N399`；第 3 页 `N401–N499`/`N501–N599`。旧 ini 只有第 1 页时，后两页保持默认。
+- `N1094` 记录可见页数（1–3，缺省 1）；第 1 页始终存在，第 2/3 页可通过页签 `＋` 增加、`×` 删除。删除中间页时其后页内容依次前移，末页清空；删除前二次确认，默认按钮为“否”。
+- `N1095` 记录「自动滚动」开关（缺省 1）。勾选时 `AppendRecv/RenderLogFromText` 始终滚到最新（不再判断是否在底部），`SizeChanged/DpiChanged/Activated/Move` 也会 `ScheduleScrollRecvToLatest` 回底；关闭后才保留用户当前滚动位置。日志头的「暂停/继续」与这个开关是同一状态。
 - 数据字段转义：`,`→`0x02`、CR→`0x03`、LF→`0x04`；设置行格式 `N<键>=,<值>`。
 - 关窗：停定时器 → `SaveConfig()` → 断网络/关串口。保存几何时最大化用 `RestoreBounds`，不保存屏幕外边界。
 - 多条数据/顺序/延时框按键走约 400ms 防抖再写 ini；勾选、注释和「保存参数」仍马上写。关窗会停掉防抖定时器再按当前控件内容写一次。
@@ -170,7 +175,7 @@ taskkill //IM SscomRe.exe //F
 - 日志头：`LogBarHeight = max(44, Theme.Scale(this,44))`；标题/副标题固定高度 + `RowFlowPanel` 垂直居中；搜索/暂停/清除/保存放在右侧 `RowFlowPanel`，搜索框宽度随 DPI 缩放。日志头的 TableLayoutPanel 必须有显式 Percent 行，否则默认 100px 会压住日志。
 - `WrapRowPanel`：宽度固定为父宽、按 `GetPreferredSize(width)` 自动增高、按视觉行垂直居中；`MarkRightGroup`/`AlignRightGroup` 用于右侧组；`StretchControl` 用于路径框填充。设置入口在右侧组；`RowFlowPanel` 的 `OnLayout` 按“视觉行”分别垂直居中，浮层内换行时不能把所有子控件拉回同一行。
 - 窗口最小尺寸基准 820×560，按 `Theme.Scale` 随 DPI 放大，并且不超过当前屏幕工作区。`UpdateMinimumHeight()` 用 `ComposerHeight`（发送区收起时只算设置行）保证日志/发送区/状态栏不被挤出；`ScheduleResponsiveRelayout()` 在缩放后延迟终排并更新侧栏宽度/composer 行高/日志头响应式。
-- 多条字符串 297 行不用 TableLayoutPanel：`MultiRowsPanel` 自绘布局（固定行高/列宽，一次定位），分 3 页；首次展开前 `_prewarmTimer` 在 OnShown 后分批创建句柄（每 20ms 8 个）。
+- 多条字符串最多 297 行不用 TableLayoutPanel：`MultiRowsPanel` 自绘布局（固定行高/列宽，一次定位）；默认只显示第 1 页，第 2/3 页按需显示。首次展开前 `_prewarmTimer` 在 OnShown 后分批创建句柄（每 20ms 8 个）。
 - 高 DPI：200% 窄屏三栏会拥挤；`UpdateLogHeaderResponsive` 在中心宽度 <620 隐藏搜索框、<420 隐藏副标题。改动布局时在 100% 和 200% 下都要看；当前已在 192 DPI 自检、125%/200% 窗口截图核对，100%/150% 尚未单独回归。
 
 ### 5.6 深/浅主题 / 自绘控件（Phase 1）
@@ -190,7 +195,9 @@ taskkill //IM SscomRe.exe //F
 - 按钮：`ThemeButton` 按 Text 映射矢量图标（清除/打开/发送文件/停止/清发送区/保存/扩展/更多设置/刷新/±/━/■）；高度用 `Font.Height + 12`，留出 FlowLayoutPanel 的 Margin，避免 200% DPI 被行裁切。
 - 复选框：`ThemeCheckBox` 勾选用琥珀色，`Highlighted` 控制暖色标签底；`StatusTick` 的 `Highlight` 只改这个属性，不要再设 `BackColor=Yellow`。
 - 文本框：`ThemeTextBox` 提供 `PlaceholderText`（路径框“未选择文件”），并在句柄创建时尝试 `SetWindowTheme(..., "DarkMode_Explorer")` 让原生滚动条变暗。
-- 多条字符串 3 页不再用 `TabControl`（原生页框在深色下始终有浅色边），改为 `pageHost` + `pageBar` 自绘分段按钮；`_multiPages`/`_multiTabs` 管理显隐。自检按“第1/2/3页”按钮计数，不按 `TabPage`。
+- 多条字符串不再用 `TabControl`（原生页框在深色下始终有浅色边），改为 `pageHost` + `pageBar` 自绘页签；`_multiPageCount`/`_multiPage`/`_multiPages`/`_multiTabs`/`_multiCloseTabs` 管理页数、选中页与显隐，`_multiAddTab` 在 3 页时禁用。删除页只清控件数据，不销毁 99 行控件；自检用内部页数/数据钩子验证增删与移位。
+- 多条面板方案 02（v1.2.0）：根为 5 行 `TableLayoutPanel`（标题/工具条/页签/表格卡/页脚），表格卡是自绘 `CardPanel`，页签用 `ThemeButton.Segment(SegmentSelected)`，循环发送用 `ThemeSwitch`，行按钮用 `ThemeButton.Soft + AccentText`。`MultiRowsPanel` 自绘斑马纹/悬停行/表头强调线/圆角字段底和聚焦描边，单元格文本框统一 `BorderStyle=None` 并用 `Rectangle.Inflate(bounds,2,2)` 画出圆角边框；改行高/列宽时要同步这段绘制。
+- 日志头端口下拉 `LogPortPicker` 与连接栏 `PortField` 共用 `PortPopup`：`TogglePortPopup(anchor)` 记录 `_portPopupAnchor`，关闭时同时复位两个控件的 `Opened`；`PortPopupDismissFilter` 必须放行 `IsPortPopupAnchor` 里的两个锚点，否则点标题会先关再开。
 - composer 设置行高度按 `RowHeightOf` 额外 +4px（`UpdateComposerGridRows`），给自绘下拉框/按钮留 Margin。
 - 禁止在深色控件上再用 `SystemColors.Control/Window/WindowText` 或 `Color.White/Yellow`；所有颜色走 `Theme` token。
 

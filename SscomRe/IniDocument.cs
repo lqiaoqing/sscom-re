@@ -94,6 +94,8 @@ public static class IniDocument
         Setting(sb, "窗口字体样式", 1091, snap.FontStyle.ToString(CultureInfo.InvariantCulture));
         Setting(sb, "主题(0=深色,1=浅色)", 1092, snap.ThemeLight ? "1" : "0");
         Setting(sb, "连接栏折叠(0=展开,1=折叠)", 1093, snap.SideCollapsed ? "1" : "0");
+        Setting(sb, "多条字符串页数(1-3)", 1094, snap.MultiPageCount.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "自动滚动到最新(0=否,1=是)", 1095, Bit(snap.AutoScroll));
         Setting(sb, "C:Chinese汉语, E:English", 1100, "C");
         sb.Append(";end\r\n");
         return sb.ToString();
@@ -287,6 +289,8 @@ public static class IniDocument
                 break;
             case 1092: snap.ThemeLight = IsOn(value); break;
             case 1093: snap.SideCollapsed = IsOn(value); break;
+            case 1094: snap.MultiPageCount = Fx.Clamp(ParseInt(value, 1), 1, MultiPageCount); break;
+            case 1095: snap.AutoScroll = IsOn(value); break;
             case 1100:
                 snap.Language = value;
                 break;
@@ -378,5 +382,9 @@ public sealed class IniSnapshot
     public bool ThemeLight { get; set; }
     /// <summary>N1093：连接栏 0 展开、1 折叠；重写版新增键。</summary>
     public bool SideCollapsed { get; set; }
+    /// <summary>N1094：可见多条字符串页数 1–3；重写版新增键，缺省只显示第 1 页。</summary>
+    public int MultiPageCount { get; set; } = 1;
+    /// <summary>N1095：接收日志是否自动滚动到最新；重写版新增键，缺省开启。</summary>
+    public bool AutoScroll { get; set; } = true;
     public string Language { get; set; } = "C";
 }

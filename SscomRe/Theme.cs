@@ -179,6 +179,16 @@ internal static class Theme
 
     public static Color WithAlpha(int alpha, Color color) => Color.FromArgb(alpha, color);
 
+    public static Color Mix(Color from, Color to, float amount)
+    {
+        float t = Math.Max(0F, Math.Min(1F, amount));
+        return Color.FromArgb(
+            (int)Math.Round(from.A + (to.A - from.A) * t),
+            (int)Math.Round(from.R + (to.R - from.R) * t),
+            (int)Math.Round(from.G + (to.G - from.G) * t),
+            (int)Math.Round(from.B + (to.B - from.B) * t));
+    }
+
     public static GraphicsPath RoundedRect(Rectangle bounds, int radius)
     {
         var path = new GraphicsPath();
@@ -224,6 +234,15 @@ internal static class Theme
 
     private static readonly Lazy<Icon> AppIcon = new(() =>
     {
+        try
+        {
+            Icon? extracted = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            if (extracted is not null) return extracted;
+        }
+        catch
+        {
+            // 没嵌入图标时退回下面手绘的占位图标
+        }
         using var bmp = new Bitmap(32, 32);
         using (var g = Graphics.FromImage(bmp))
         {
@@ -249,6 +268,9 @@ internal static class Theme
             DestroyIcon(handle);
         }
     });
+
+    private static readonly Lazy<Bitmap> AppIconBitmapLazy = new(() => AppIcon.Value.ToBitmap());
+    public static Bitmap AppIconBitmap => AppIconBitmapLazy.Value;
 
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
