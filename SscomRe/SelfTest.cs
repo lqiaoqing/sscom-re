@@ -432,6 +432,16 @@ internal static class SelfTest
             CheckText("表内波特率下标", tableIndex.ToString(), "13");
             ComPortService.ApplyBaudText("0", out int zeroIndex, out int zeroValue);
             CheckText("波特率0选115200", $"{zeroIndex},{zeroValue}", "13,115200");
+
+            CheckText("换串口自动重开", MainForm.ShouldReopenSerial(true, NetMode.Serial, "COM3", "COM4") ? "yes" : "no", "yes");
+            CheckText("同串口不重开", MainForm.ShouldReopenSerial(true, NetMode.Serial, "COM3", "COM03") ? "yes" : "no", "no");
+            CheckText("关闭状态不重开", MainForm.ShouldReopenSerial(false, NetMode.Serial, "", "COM4") ? "yes" : "no", "no");
+            CheckText("失败后仍想开", MainForm.ShouldReopenSerial(true, NetMode.Serial, "", "COM4") ? "yes" : "no", "yes");
+            CheckText("网络模式不重开串口", MainForm.ShouldReopenSerial(true, NetMode.TcpClient, "COM3", "COM4") ? "yes" : "no", "no");
+            CheckText("空端口不重开", MainForm.ShouldReopenSerial(true, NetMode.Serial, "COM3", "TCPClient") ? "yes" : "no", "no");
+            CheckText("端口显示带描述", ComPortService.FormatPortChoice("COM38", "USB 串行设备"), "COM38 · USB 串行设备");
+            CheckText("端口显示无描述", ComPortService.FormatPortChoice("COM38", ""), "COM38");
+            CheckText("描述文本还原端口", ComPortService.NormalizePortName("COM38 · USB 串行设备"), "COM38");
         }
 
         // —— 窗口几何夹取 ——
@@ -559,7 +569,8 @@ internal static class SelfTest
             string ini = Path.Combine(AppContext.BaseDirectory, "sscom51.ini");
             byte[]? iniBackup = File.Exists(ini) ? File.ReadAllBytes(ini) : null;
             using var form = new MainForm();
-            form.AnimationsEnabled = false;
+            CheckText("标题显示版本", form.Text.Contains(MainForm.AppVersion) ? "yes" : "no", "yes");
+            CheckText("版本号格式", System.Text.RegularExpressions.Regex.IsMatch(MainForm.AppVersion, @"^\d+\.\d+\.\d+$") ? "yes" : "no", "yes");
             form.StartPosition = FormStartPosition.Manual;
             form.Location = new Point(-24000, -24000);
             form.Show();
@@ -573,13 +584,48 @@ internal static class SelfTest
             CheckBox? stamp = null;
             foreach (var c in AllControls(form))
             {
-                if (c is TextBox tb && tb.Multiline && tb.Text == "abcdefg") send = tb;
+                if (c is TextBox { Tag: "send" } tb) send = tb;
                 if (c is RichTextBox rich) recv = rich;
                 if (c is ComboBox box && box.Items.Contains("ModbusCRC16")) verify = box;
                 if (c is CheckBox cb && cb.Text == "加时间戳和分包显示") stamp = cb;
             }
             CheckText("找到发送框", send is null ? "no" : "yes", "yes");
             CheckText("找到接收框", recv is null ? "no" : "yes", "yes");
+            string[] portItems = form.PortComboItemsForTest;
+            CheckText("端口/波特率字段等宽",
+                form.PortFieldWidthForTest == form.BaudComboWidthForTest ? "yes" : "no", "yes");
+            var descriptions = ComPortService.PortDescriptions();
+            bool hasDescribedPort = false;
+            bool descriptionsFormed = true;
+            foreach (string item in portItems)
+            {
+                string portName = ComPortService.NormalizePortName(item);
+                if (!descriptions.TryGetValue(portName, out string? description) ||
+                    string.IsNullOrWhiteSpace(description)) continue;
+                hasDescribedPort = true;
+                if (item != ComPortService.FormatPortChoice(portName, description))
+                    descriptionsFormed = false;
+            }
+            CheckText("端口描述格式",
+                !hasDescribedPort || descriptionsFormed ? "yes" : "no", "yes");
+            if (recv is not null)
+            {
+                form.AppendLogForTest(string.Join("\r\n", Enumerable.Range(0, 200).Select(i => "test line " + i)));
+                recv.SelectionStart = recv.TextLength;
+                recv.SelectionLength = 0;
+                recv.ScrollToCaret();
+                Application.DoEvents();
+                CheckText("日志跟随到底部", form.RecvAtBottomForTest() ? "yes" : "no", "yes");
+                recv.SelectionStart = 0;
+                recv.SelectionLength = 0;
+                recv.ScrollToCaret();
+                Application.DoEvents();
+                CheckText("上翻后不在底部", form.RecvAtBottomForTest() ? "yes" : "no", "no");
+                recv.SelectionStart = recv.TextLength;
+                recv.SelectionLength = 0;
+                recv.ScrollToCaret();
+                Application.DoEvents();
+            }
             CheckText("搜索无结果提示", form.SearchForTest("definitely-not-in-log") ? "yes" : "no", "yes");
             form.HideToastForTest();
             if (send is not null && recv is not null)
@@ -718,22 +764,48 @@ internal static class SelfTest
                 CheckText("三页共297条", dataBoxes.ToString(), "297");
             }
 
-            form.AnimationsEnabled = true;
             form.ToggleComposerForTest();
-            for (int i = 0; i < 40 && form.AnimationRunningForTest; i++)
-            {
-                Application.DoEvents();
-                Thread.Sleep(15);
-            }
-            CheckText("composer 收起动画完成", form.ComposerVisibleForTest ? "no" : "yes", "yes");
+            Application.DoEvents();
+            CheckText("发送区可收起", form.ComposerVisibleForTest ? "no" : "yes", "yes");
             form.ToggleComposerForTest();
-            for (int i = 0; i < 40 && form.AnimationRunningForTest; i++)
+            Application.DoEvents();
+            CheckText("发送区可展开", form.ComposerVisibleForTest ? "yes" : "no", "yes");
+
+            form.SetSidebarCollapsedForTest(false);
+            Application.DoEvents();
+            CheckText("侧栏默认展开", form.SidebarVisibleForTest ? "yes" : "no", "yes");
+            CheckText("端口字段与模型同步", form.PortFieldTextForTest, form.PortComboTextForTest);
+            form.OpenPortPopupForTest();
+            Application.DoEvents();
+            CheckText("端口浮层可打开", form.PortPopupVisibleForTest ? "yes" : "no", "yes");
+            form.ClosePortPopupForTest();
+            Application.DoEvents();
+            CheckText("侧栏展开宽度", form.SidebarColumnWidthForTest.ToString(), form.SidebarExpandedWidthForTest.ToString());
+            Button? sidebarCollapse = null;
+            foreach (var c in AllControls(form))
+                if (c is Button { Text: "«" } b) sidebarCollapse = b;
+            CheckText("日志头有收起开关", sidebarCollapse is { Visible: true } ? "yes" : "no", "yes");
+            if (sidebarCollapse is not null)
             {
+                sidebarCollapse.PerformClick();
+                CheckText("收起立即生效", form.SidebarColumnWidthForTest.ToString(), "0");
                 Application.DoEvents();
-                Thread.Sleep(15);
+                CheckText("收起后侧栏完全隐藏", form.SidebarVisibleForTest ? "no" : "yes", "yes");
+                CheckText("收起后开关仍在日志头", form.SidebarToggleVisibleForTest ? "yes" : "no", "yes");
+                CheckText("收起后开关变为展开", form.SidebarToggleTextForTest, "»");
+                CheckText("收起后日志头仍显示连接", form.LogTitleVisibleForTest ? "yes" : "no", "yes");
+                Button? sidebarExpand = null;
+                foreach (var c in AllControls(form))
+                    if (c is Button { Text: "»" } b) sidebarExpand = b;
+                CheckText("找到日志头展开开关", sidebarExpand is { Visible: true } ? "yes" : "no", "yes");
+                if (sidebarExpand is not null)
+                {
+                    sidebarExpand.PerformClick();
+                    Application.DoEvents();
+                    CheckText("展开后侧栏恢复", form.SidebarVisibleForTest ? "yes" : "no", "yes");
+                    CheckText("展开后宽度恢复", form.SidebarColumnWidthForTest.ToString(), form.SidebarExpandedWidthForTest.ToString());
+                }
             }
-            CheckText("composer 展开动画完成", form.ComposerVisibleForTest ? "yes" : "no", "yes");
-            form.AnimationsEnabled = false;
             form.Close();
             // Close 会保存测试中改过的字体/模式/几何；收尾时还原用户原配置。
             if (iniBackup is not null) File.WriteAllBytes(ini, iniBackup);

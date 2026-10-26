@@ -37,12 +37,13 @@ internal sealed class ThemeButton : Button
     private int IconSize => Math.Max(12, (int)(Font.Height * 0.72F));
     private int IconGap => Math.Max(4, Theme.Scale(this, 6));
 
-    private static bool IsIconOnly(string text) => text is "↻" or "−" or "＋" or "━";
+    private static bool IsIconOnly(string text) => text is "↻" or "−" or "＋" or "━" or "■" or "«" or "»";
 
     private static bool HasIcon(string text) => text switch
     {
         "清除窗口" or "打开文件" or "发送文件" or "停止" or "清发送区"
-            or "保存参数" or "保存数据" or "扩展" or "更多串口设置" => true,
+            or "保存参数" or "保存数据" or "扩展" or "更多串口设置"
+            or "打开串口" or "关闭串口" => true,
         _ => false,
     };
 
@@ -203,6 +204,34 @@ internal sealed class ThemeButton : Button
                 g.DrawLine(pen, x + w * .18F, y + h * .5F, x + w * .82F, y + h * .5F);
                 g.DrawLine(pen, x + w * .5F, y + h * .18F, x + w * .5F, y + h * .82F);
                 break;
+            case "«":
+                g.DrawLines(pen, new[]
+                {
+                    new PointF(x + w * .62F, y + h * .26F),
+                    new PointF(x + w * .42F, y + h * .5F),
+                    new PointF(x + w * .62F, y + h * .74F),
+                });
+                g.DrawLines(pen, new[]
+                {
+                    new PointF(x + w * .42F, y + h * .26F),
+                    new PointF(x + w * .22F, y + h * .5F),
+                    new PointF(x + w * .42F, y + h * .74F),
+                });
+                break;
+            case "»":
+                g.DrawLines(pen, new[]
+                {
+                    new PointF(x + w * .38F, y + h * .26F),
+                    new PointF(x + w * .58F, y + h * .5F),
+                    new PointF(x + w * .38F, y + h * .74F),
+                });
+                g.DrawLines(pen, new[]
+                {
+                    new PointF(x + w * .58F, y + h * .26F),
+                    new PointF(x + w * .78F, y + h * .5F),
+                    new PointF(x + w * .58F, y + h * .74F),
+                });
+                break;
             case "清除窗口":   // trash
                 g.DrawLine(pen, x + w * .18F, y + h * .25F, x + w * .82F, y + h * .25F);
                 g.DrawLine(pen, x + w * .38F, y + h * .25F, x + w * .38F, y + h * .14F);
@@ -234,7 +263,8 @@ internal sealed class ThemeButton : Button
                 });
                 g.DrawLine(pen, x + w * .18F, y + h * .84F, x + w * .82F, y + h * .84F);
                 break;
-            case "停止":       // stop square
+            case "停止":
+            case "■":          // stop square
                 using (var fill = new SolidBrush(color))
                     g.FillRectangle(fill, x + w * .26F, y + h * .26F, w * .48F, h * .48F);
                 break;
@@ -266,6 +296,11 @@ internal sealed class ThemeButton : Button
                 g.DrawLine(pen, x + w * .46F, y + h * .68F, x + w * .90F, y + h * .68F);
                 g.DrawEllipse(pen, x + w * .60F, y + h * .22F, w * .16F, h * .20F);
                 g.DrawEllipse(pen, x + w * .28F, y + h * .58F, w * .16F, h * .20F);
+                break;
+            case "打开串口":
+            case "关闭串口": // power
+                g.DrawArc(pen, x + w * .18F, y + h * .18F, w * .64F, h * .64F, -55, 290);
+                g.DrawLine(pen, x + w * .5F, y + h * .12F, x + w * .5F, y + h * .46F);
                 break;
         }
     }

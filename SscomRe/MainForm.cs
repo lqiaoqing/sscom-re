@@ -28,14 +28,15 @@ public sealed partial class MainForm : Form
     private ToolStripStatusLabel _rxRateLabel = null!;
     private ToolStripStatusLabel _txRateLabel = null!;
     private ToolStripStatusLabel _bufferLabel = null!;
-    private Sparkline _sparkline = null!;
     private readonly System.Windows.Forms.Timer _rateTimer = new() { Interval = 500 };
     private long _lastSentSample;
     private long _lastRecvSample;
-    private readonly List<float> _rxRateSamples = new();
 
     // 控件
     private ComboBox _portCombo = null!;
+    private PortField _portField = null!;
+    private PortPopup _portPopup = null!;
+    private PortPopupDismissFilter? _portPopupFilter;
     private ComboBox _baudCombo = null!;
     private Button _openButton = null!;
     private CheckBox _rtsBox = null!;
@@ -161,22 +162,20 @@ public sealed partial class MainForm : Form
     private TableLayoutPanel _bodyLayout = null!;
     private Panel _sidePanel = null!;
     private Control _sideContent = null!;
-    private Panel _railPanel = null!;
-    private ThemeButton _railExpand = null!;
-    private ThemeButton _railOpen = null!;
-    private Label _railModeLabel = null!;
-    private Label _railPortLabel = null!;
-    private Label _railDot = null!;
+    private ResizeSplitter _sideSplitter = null!;
+    private int _sideWidth;
+    private ThemeButton _sidebarToggle = null!;
     private bool _sideCollapsed;
     private bool _sideAutoCollapsed;
     private bool _sideManualOverride;
     private bool _sideUserCollapsed;
     private TableLayoutPanel _serialSection = null!;
     private TableLayoutPanel _netSection = null!;
-    private Label _sideModeLabel = null!;
-    private Label _lineInfoLabel = null!;
+    private ThemeChip _sideModeLabel = null!;
+    private SideStatusCard _sideStatusCard = null!;
     private Label _logTitleLabel = null!;
     private Label _logSubLabel = null!;
+    private bool _portOpenIntent;
     private Panel _composerPanel = null!;
     private TableLayoutPanel _composerGrid = null!;
     private TableLayoutPanel _centerLayout = null!;
@@ -185,7 +184,7 @@ public sealed partial class MainForm : Form
 
     public MainForm()
     {
-        Text = "串口/网络数据调试器（重写版）";
+        Text = $"串口/网络数据调试器（重写版）v{AppVersion}";
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Microsoft YaHei UI", 9F);
         Width = 980;
@@ -221,21 +220,27 @@ public sealed partial class MainForm : Form
         var center = BuildCenterPhase2();
         var status = BuildStatusBar();
 
+        _sideWidth = SidebarWidth();
         _bodyLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
             Margin = new Padding(0),
             Padding = new Padding(0),
             BackColor = Theme.Canvas,
         };
-        _bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SidebarWidth()));
+        _bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, _sideWidth));
+        _bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SideSplitterThickness()));
         _bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        _sideSplitter = new ResizeSplitter { Orientation = Orientation.Vertical, Dock = DockStyle.Fill, BackColor = Theme.Surface2 };
+        _sideSplitter.Dragged += ResizeSidebarBy;
+        _rowTip.SetToolTip(_sideSplitter, "拖动调整连接栏宽度");
         side.Dock = DockStyle.Fill;
         center.Dock = DockStyle.Fill;
         _bodyLayout.Controls.Add(side, 0, 0);
-        _bodyLayout.Controls.Add(center, 1, 0);
+        _bodyLayout.Controls.Add(_sideSplitter, 1, 0);
+        _bodyLayout.Controls.Add(center, 2, 0);
 
         var root = new TableLayoutPanel
         {
@@ -261,21 +266,52 @@ public sealed partial class MainForm : Form
 
         toolBar.SizeChanged += (_, _) => { UpdateToolbarRowHeight(toolBar); ScheduleResponsiveRelayout(); };
         UpdateToolbarRowHeight(toolBar);
-        SizeChanged += (_, _) => { HideToast(); CloseFlyout(); ScheduleResponsiveRelayout(); };
-        Move += (_, _) => { HideToast(); CloseFlyout(); };
-        menu.MenuActivate += (_, _) => CloseFlyout();
+        SizeChanged += (_, _) => { HideToast(); CloseFlyout(); ClosePortPopup(false); ScheduleResponsiveRelayout(); };
+        Move += (_, _) => { HideToast(); CloseFlyout(); ClosePortPopup(false); };
+        menu.MenuActivate += (_, _) => { CloseFlyout(); ClosePortPopup(false); };
 
         Controls.Add(root);
         Controls.Add(menu);
         MainMenuStrip = menu;
         BuildSettingsFlyouts();
+        BuildPortPopup();
         BuildToast();
         ResumeLayout();
     }
 
     private int LineHeight() => Math.Max(28, Font.Height + 14);
 
+    internal static string AppVersion
+    {
+        get
+        {
+            Version? version = typeof(MainForm).Assembly.GetName().Version;
+            return version is null ? "1.1.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+        }
+    }
+
     private int SidebarWidth() => Math.Max(240, Theme.Scale(this, 280));
+    private int SideSplitterThickness() => Math.Max(7, Theme.Scale(this, 8));
+    private int MaxSidebarWidth() => Math.Max(240, Theme.Scale(this, 480));
+
+    private void ResizeSidebarBy(int delta)
+    {
+        if (_sideCollapsed || _bodyLayout is null) return;
+        int min = Math.Max(200, Theme.Scale(this, 220));
+        int maxByWindow = ClientSize.Width - Theme.Scale(this, 600) - SideSplitterThickness() - Theme.Scale(this, 16);
+        int max = Math.Min(MaxSidebarWidth(), Math.Max(min, maxByWindow));
+        int wanted = Fx.Clamp(_sideWidth + delta, min, max);
+        if (wanted == _sideWidth) return;
+        _sideWidth = wanted;
+        _sideManualOverride = true;
+        _sideAutoCollapsed = false;
+        _sideUserCollapsed = false;
+        _bodyLayout.ColumnStyles[0].Width = wanted;
+        _bodyLayout.PerformLayout();
+        FitSidebar(_sideContent);
+        UpdateComposerLayout();
+        UpdateMinimumHeight();
+    }
 
     private void UpdateToolbarRowHeight(Control toolBar)
     {
@@ -300,7 +336,7 @@ public sealed partial class MainForm : Form
 
             if (!_sideManualOverride)
             {
-                bool narrow = ClientSize.Width < SidebarWidth() + 720;
+                bool narrow = ClientSize.Width < _sideWidth + 720;
                 if (narrow && !_sideCollapsed)
                     SetSidebarCollapsed(true, persist: false, manual: false, automatic: true);
                 else if (!narrow && _sideAutoCollapsed)
@@ -308,9 +344,13 @@ public sealed partial class MainForm : Form
             }
             if (_bodyLayout is not null)
             {
-                float wanted = _sideCollapsed ? RailWidth() : SidebarWidth();
+                float wanted = _sideCollapsed ? 0 : _sideWidth;
                 if (Math.Abs(_bodyLayout.ColumnStyles[0].Width - wanted) > 0.5f)
                     _bodyLayout.ColumnStyles[0].Width = wanted;
+                float splitter = _sideCollapsed ? 0 : SideSplitterThickness();
+                if (Math.Abs(_bodyLayout.ColumnStyles[1].Width - splitter) > 0.5f)
+                    _bodyLayout.ColumnStyles[1].Width = splitter;
+                if (_sideSplitter is not null) _sideSplitter.Visible = !_sideCollapsed;
             }
             UpdateComposerLayout();
             _rootLayout.PerformLayout();
@@ -454,8 +494,9 @@ public sealed partial class MainForm : Form
         var multi = new ToolStripMenuItem("多条字符串", null, (_, _) => ToggleMultiPanel());
         var help = new ToolStripMenuItem("帮助");
         help.DropDownItems.Add(new ToolStripMenuItem("关于", null, (_, _) =>
-            MessageBox.Show(this, "SSCOM 重写版（C# / .NET Framework 4.8）\n依据 sscom5.13.1-rewrite-spec.md 的行为规则实现。", "关于",
-                MessageBoxButtons.OK, MessageBoxIcon.Information)));
+            MessageBox.Show(this,
+                $"SSCOM 重写版（C# / .NET Framework 4.8）\n版本 v{AppVersion}\n依据 sscom5.13.1-rewrite-spec.md 的行为规则实现。",
+                $"关于 SscomRe v{AppVersion}", MessageBoxButtons.OK, MessageBoxIcon.Information)));
 
         menu.Items.AddRange(new ToolStripItem[] { comm, portCfg, display, send, multi, help });
         Theme.StyleMenu(menu);
@@ -499,10 +540,7 @@ public sealed partial class MainForm : Form
         Put(panel, _topmostBox);
         Put(panel, ActionButton("保存参数", SaveConfig));
         _hideToggleButton = ActionButton("扩展", ToggleMultiPanel);
-        _collapseButton = ActionButton("━", ToggleBottomPanels);
-        if (_collapseButton is ThemeButton collapse) collapse.Kind = ThemeButton.ButtonKind.Icon;
         Put(panel, _hideToggleButton);
-        Put(panel, _collapseButton);
         return panel;
     }
 
@@ -531,6 +569,18 @@ public sealed partial class MainForm : Form
         _sendSettingsButton = SettingButton("发送设置 ▾");
         Put(row, _recvSettingsButton);
         Put(row, _sendSettingsButton);
+        _collapseButton = new ThemeButton
+        {
+            Text = "━",
+            Kind = ThemeButton.ButtonKind.Icon,
+            AutoSize = false,
+            Width = Math.Max(Theme.Scale(this, 26), Font.Height + 8),
+            Height = Math.Max(Theme.Scale(this, 26), Font.Height + 8),
+            Margin = new Padding(2, 1, 2, 1),
+        };
+        _collapseButton.Click += (_, _) => ToggleBottomPanels();
+        _rowTip.SetToolTip(_collapseButton, "收起发送区");
+        row.Controls.Add(_collapseButton);
         return row;
     }
 
@@ -1133,6 +1183,7 @@ public sealed partial class MainForm : Form
             ForeColor = Theme.Text,
             Font = Theme.MonoFont(10F),
             Text = "abcdefg",            // 规格：发送框默认 ASC 内容
+            Tag = "send",
         };
         var textHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(1), BackColor = Theme.Border };
         textHost.Controls.Add(_sendBox);
@@ -1160,19 +1211,6 @@ public sealed partial class MainForm : Form
         _rxRateLabel = new ToolStripStatusLabel("RX 0 B/s") { AutoSize = true, ForeColor = Theme.Accent };
         _txRateLabel = new ToolStripStatusLabel("TX 0 B/s") { AutoSize = true, ForeColor = Theme.StatusSend };
         _bufferLabel = new ToolStripStatusLabel("缓冲 0%") { AutoSize = true, ForeColor = Theme.Muted };
-        _sparkline = new Sparkline
-        {
-            Width = Math.Max(72, Font.Height * 3),
-            Height = Math.Max(14, Font.Height - 8),
-            Margin = new Padding(6, 0, 4, 0),
-        };
-        var sparkHost = new ToolStripControlHost(_sparkline)
-        {
-            AutoSize = false,
-            Width = _sparkline.Width,
-            Height = _sparkline.Height,
-            Margin = new Padding(4, 0, 3, 0),
-        };
         _connStatus.ForeColor = Theme.Text;
         _sentStatus.ForeColor = Theme.StatusSend;
         _recvStatus.ForeColor = Theme.Accent;
@@ -1180,7 +1218,7 @@ public sealed partial class MainForm : Form
         strip.Items.AddRange(new ToolStripItem[]
         {
             _connStatus, _sentStatus, _recvStatus, _modemStatus,
-            sparkHost, _rxRateLabel, _txRateLabel, _bufferLabel,
+            _rxRateLabel, _txRateLabel, _bufferLabel,
         });
         Theme.StyleStatus(strip);
         return strip;
@@ -1215,6 +1253,8 @@ public sealed partial class MainForm : Form
         _recvToFileBox.CheckedChanged += (_, _) => RefreshRecvSnapshot();
         _timeoutEdit.TextChanged += (_, _) => RefreshRecvSnapshot();
         _portCombo.TextChanged += (_, _) => DetectMode();     // 下拉文本变化 → 重探模式（面板/定时器联动）
+        _portField.PickerRequested += (_, _) => TogglePortPopup();
+        _portField.ManualTextCommitted += CommitManualPort;
         _net.ReadyChanged += () => Post(UpdateStatus);
         _net.DataReceived += OnNetData;
         _net.RemoteIpLearned += ip => Post(() =>
@@ -1371,15 +1411,13 @@ public sealed partial class MainForm : Form
 
     private bool RecvAtBottom()
     {
-        var si = new SCROLLINFO
-        {
-            cbSize = (uint)Marshal.SizeOf(typeof(SCROLLINFO)),
-            fMask = SIF_ALL,
-        };
-        if (!GetScrollInfo(_recvBox.Handle, SB_VERT, ref si))
-            return true;
-        int max = Math.Max(si.nMin, si.nMax - si.nPage + 1);
-        return si.nPos >= max;
+        if (!_recvBox.IsHandleCreated) return true;
+        int len = _recvBox.TextLength;
+        if (len == 0) return true;
+        if (_recvBox.ClientSize.Height <= 0) return true;
+        // 滚动条 nMax/nPage 的“底部”在各版本 RichEdit 里差一行，直接看最后一个字符是否在可见区。
+        Point last = _recvBox.GetPositionFromCharIndex(len - 1);
+        return last.Y >= 0 && last.Y < _recvBox.ClientSize.Height;
     }
 
     private Point GetRecvScroll()
@@ -1397,9 +1435,6 @@ public sealed partial class MainForm : Form
     }
 
     [DllImport("user32.dll")]
-    private static extern bool GetScrollInfo(IntPtr hWnd, int nBar, ref SCROLLINFO si);
-
-    [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, ref Point lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -1415,16 +1450,6 @@ public sealed partial class MainForm : Form
         try { SendMessage(box.Handle, EM_SETCUEBANNER, (IntPtr)1, text); } catch { }
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct SCROLLINFO
-    {
-        public uint cbSize;
-        public uint fMask;
-        public int nMin, nMax, nPage, nPos, nTrackPos;
-    }
-
-    private const int SB_VERT = 1;
-    private const uint SIF_ALL = 0x17;
     private const int EM_GETSCROLLPOS = 0x04DD;
     private const int EM_SETSCROLLPOS = 0x04DE;
 
@@ -1578,25 +1603,68 @@ public sealed partial class MainForm : Form
         if (_port.IsOpen)
         {
             _port.Close();
+            _portOpenIntent = false;
         }
         else
         {
-            try
-            {
-                _port.BaudIndex = _baudCombo.SelectedIndex;
-                if (_baudCombo.SelectedIndex <= 0) CommitCustomBaud(notify: true);
-                _port.DtrWanted = _dtrBox.Checked;
-                _port.RtsWanted = _rtsBox.Checked;
-                _port.Open(_portCombo.Text);
-                // 打开成功后恢复“发送文件/发送”（RTS/DTR 失败分支曾把它们禁用）
-                _sendFileButton.Enabled = true;
-                _sendButton.Enabled = true;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, ex.Message, "打开串口", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            OpenPort();
         }
+        UpdateStatus();
+    }
+
+    private void OpenPort()
+    {
+        // 打开失败也保留“想保持打开”的意图，下一次换口/选择端口继续尝试。
+        _portOpenIntent = true;
+        try
+        {
+            _port.BaudIndex = _baudCombo.SelectedIndex;
+            if (_baudCombo.SelectedIndex <= 0) CommitCustomBaud(notify: true);
+            _port.DtrWanted = _dtrBox.Checked;
+            _port.RtsWanted = _rtsBox.Checked;
+            _port.Open(_portCombo.Text);
+            // 打开成功后恢复“发送文件/发送”（RTS/DTR 失败分支曾把它们禁用）
+            _sendFileButton.Enabled = true;
+            _sendButton.Enabled = true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "打开串口", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    /// <summary>串口已打开时换到另一个 COM 端口才需要关旧口再开新口。</summary>
+    internal static bool ShouldReopenSerial(bool wantOpen, NetMode mode, string openedPort, string chosenText)
+    {
+        if (!wantOpen || mode != NetMode.Serial) return false;
+        string opened = ComPortService.NormalizePortName(openedPort);
+        string chosen = ComPortService.NormalizePortName(chosenText);
+        return chosen.Length > 0 && !string.Equals(opened, chosen, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool _portReopenScheduled;
+
+    /// <summary>
+    /// SelectionChangeCommitted / DropDownClosed 可能先于 ComboBox 更新 Text 触发；
+    /// 延后到消息泵处理完选择，再按新文本换口，避免总是打开上一个端口。
+    /// </summary>
+    private void SchedulePortReopen()
+    {
+        if (_portReopenScheduled || IsDisposed || !IsHandleCreated) return;
+        _portReopenScheduled = true;
+        BeginInvoke(new Action(() =>
+        {
+            _portReopenScheduled = false;
+            if (!IsDisposed) ReopenPortIfSwitched();
+        }));
+    }
+
+    private void ReopenPortIfSwitched()
+    {
+        bool wantOpen = _port.IsOpen || _portOpenIntent;
+        if (!ShouldReopenSerial(wantOpen, _netMode, _port.OpenedPortName, _portCombo.Text)) return;
+        if (_port.IsOpen) _port.Close();
+        OpenPort();
         UpdateStatus();
     }
 
@@ -1923,12 +1991,14 @@ public sealed partial class MainForm : Form
     private bool InputComment(string title, string initial, out string result)
     {
         result = initial;
+        int S(int value) => Theme.Scale(this, value);
         using var dlg = new Form
         {
             Text = title,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(300, 100),
+            ClientSize = new Size(S(300), S(100)),
+            AutoScaleMode = AutoScaleMode.None,
             MinimizeBox = false,
             MaximizeBox = false,
             ShowInTaskbar = false,
@@ -1936,10 +2006,10 @@ public sealed partial class MainForm : Form
             BackColor = Theme.Canvas,
             ForeColor = Theme.Text,
         };
-        var label = new Label { Text = "注释:", AutoSize = true, Location = new Point(10, 12), ForeColor = Theme.Muted, BackColor = Color.Transparent };
-        var box = new ThemeTextBox { Text = initial, Location = new Point(10, 34), Width = 276 };
-        var ok = new ThemeButton { Text = "确定", DialogResult = DialogResult.OK, Location = new Point(136, 64), Width = 70, Kind = ThemeButton.ButtonKind.Primary };
-        var cancel = new ThemeButton { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(216, 64), Width = 70 };
+        var label = new Label { Text = "注释:", AutoSize = true, Location = new Point(S(10), S(12)), ForeColor = Theme.Muted, BackColor = Color.Transparent };
+        var box = new ThemeTextBox { Text = initial, Location = new Point(S(10), S(34)), Width = S(276) };
+        var ok = new ThemeButton { Text = "确定", DialogResult = DialogResult.OK, Location = new Point(S(136), S(64)), Width = S(70), Kind = ThemeButton.ButtonKind.Primary };
+        var cancel = new ThemeButton { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(S(216), S(64)), Width = S(70) };
         dlg.Controls.AddRange(new Control[] { label, box, ok, cancel });
         dlg.AcceptButton = ok;
         dlg.CancelButton = cancel;
@@ -2023,6 +2093,7 @@ public sealed partial class MainForm : Form
     /// </summary>
     private void DetectMode()
     {
+        SyncPortField();
         NetMode mode = _portCombo.Text switch
         {
             "TCPClient" => NetMode.TcpClient,
@@ -2046,6 +2117,7 @@ public sealed partial class MainForm : Form
         if (_netMode != NetMode.Serial)
         {
             _port.Close();                       // 网络模式：关串口
+            _portOpenIntent = false;
             FillLocalIpCombo();
             UpdateNetworkFieldEnable();
             if (_openImmediatelyItem.Checked && !_loading)    // 加载过程中不连，留给启动后的自动打开
@@ -2062,7 +2134,6 @@ public sealed partial class MainForm : Form
         if (_netSection is not null) _netSection.Visible = !serial;
         if (_sideModeLabel is not null) _sideModeLabel.Text = serial ? "串口" : "网络";
         _sidePanel?.PerformLayout();
-        UpdateSidebarRail();
     }
 
     /// <summary>按模式禁用字段（规格：模式1 禁本地端口；模式2 禁远程IP/端口；模式3 全开）。</summary>
@@ -2161,7 +2232,11 @@ public sealed partial class MainForm : Form
         base.OnShown(e);
         ApplyMultiWidth();
         if (_bodyLayout is not null)
-            _bodyLayout.ColumnStyles[0].Width = _sideCollapsed ? RailWidth() : SidebarWidth();
+        {
+            _bodyLayout.ColumnStyles[0].Width = _sideCollapsed ? 0 : _sideWidth;
+            _bodyLayout.ColumnStyles[1].Width = _sideCollapsed ? 0 : SideSplitterThickness();
+        }
+        if (_sideSplitter is not null) _sideSplitter.Visible = !_sideCollapsed;
         _sidePanel?.PerformLayout();
         UpdateComposerLayout();
         UpdateMinimumHeight();
@@ -2271,9 +2346,14 @@ public sealed partial class MainForm : Form
         // 规格 Label23Click：枚举合并排序 → 重建下拉（端口 + 三协议）→ 重建端口菜单 → 按模式收尾
         var current = _portCombo.Text;
         var ports = SerialPort.GetPortNames().Distinct().OrderBy(ParseComNumber).ToList();
+        Dictionary<string, string> descriptions = ComPortService.PortDescriptions();
+        var choices = new List<string>(ports.Count);
+        foreach (string port in ports)
+            choices.Add(ComPortService.FormatPortChoice(
+                port, descriptions.TryGetValue(port, out string? desc) ? desc : null));
 
         _portCombo.Items.Clear();
-        foreach (var name in ports) _portCombo.Items.Add(name);
+        foreach (string choice in choices) _portCombo.Items.Add(choice);
         _portCombo.Items.Add("TCPClient");
         _portCombo.Items.Add("TCPServer");
         _portCombo.Items.Add("UDP");
@@ -2285,15 +2365,17 @@ public sealed partial class MainForm : Form
         _comMenuItems.Clear();
         for (int i = 0; i < ports.Count; i++)
         {
-            string caption = ports[i];
+            string caption = choices[i];
             var item = new ToolStripMenuItem(caption) { Tag = i };
             item.Click += (_, _) =>
             {
                 foreach (var it in _protocolItems) it.Checked = false;
                 foreach (var it in _comMenuItems) it.Checked = false;
                 item.Checked = true;
-                _portCombo.Text = caption;
+                _portCombo.Text = item.Text;
+                _portCombo.SelectedIndex = (int)item.Tag!;
                 DetectMode();
+                SchedulePortReopen();
             };
             _comMenuItems.Add(item);
             _commMenu.DropDownItems.Add(item);
@@ -2308,6 +2390,7 @@ public sealed partial class MainForm : Form
                 int match = ports.FindIndex(p => ComPortService.NormalizePortName(p) == normalized);
                 if (match >= 0)
                 {
+                    _portCombo.Text = _portCombo.Items[match]?.ToString() ?? normalized;
                     _portCombo.SelectedIndex = match;                 // 选中匹配端口
                     if (match < _comMenuItems.Count) _comMenuItems[match].Checked = true;
                 }
@@ -2327,6 +2410,7 @@ public sealed partial class MainForm : Form
             };
         }
         DetectMode();
+        SyncPortField();
     }
 
     private static int ParseComNumber(string name)
@@ -2350,7 +2434,7 @@ public sealed partial class MainForm : Form
 
     private void PrewarmTick()
     {
-        for (int i = 0; i < 8 && _prewarmQueue.Count > 0; i++)
+        for (int i = 0; i < 12 && _prewarmQueue.Count > 0; i++)
         {
             Control c = _prewarmQueue.Dequeue();
             try { _ = c.Handle; } catch { }
@@ -2377,16 +2461,16 @@ public sealed partial class MainForm : Form
         CloseFlyout();
         _prewarmTimer.Stop();
         _prewarmQueue.Clear();
-        FinishAnimation();
         // 规格：切换多条面板；标题在 显示态=隐藏 / 隐藏态=扩展 之间切换。
         bool show = _split.Panel2Collapsed;
         _hideToggleButton.Text = show ? "隐藏" : "扩展";
-        if (AnimationsEnabled)
-        {
-            AnimateMultiPanel(show);
-            return;
-        }
-        // 展开瞬间的布局也会挪分割线，这段不能记成用户拖过的宽度。
+        bool freezeLog = _recvBox is { IsHandleCreated: true };
+        bool followBottom = freezeLog && _autoFollow && RecvAtBottom();
+        Point scroll = freezeLog ? GetRecvScroll() : Point.Empty;
+        if (freezeLog) SendMessage(_recvBox.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+        // 一次性完成展开/收起；拖动分割线不由这里触发。
+        _bodyLayout?.SuspendLayout();
+        _split.SuspendLayout();
         _adjustingSplit = true;
         try
         {
@@ -2397,23 +2481,45 @@ public sealed partial class MainForm : Form
             _adjustingSplit = false;
         }
         if (show) ApplyMultiWidth();
+        _adjustingSplit = true;
+        try
+        {
+            _bodyLayout?.ResumeLayout(true);
+            _split.ResumeLayout(true);
+        }
+        finally
+        {
+            _adjustingSplit = false;
+        }
+        _bodyLayout?.PerformLayout();
+        UpdateLogHeaderResponsive();
+        if (freezeLog)
+        {
+            SendMessage(_recvBox.Handle, WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+            _recvBox.Invalidate();
+            if (followBottom)
+            {
+                _recvBox.SelectionStart = _recvBox.TextLength;
+                _recvBox.SelectionLength = 0;
+                _recvBox.ScrollToCaret();
+            }
+            else
+            {
+                SetRecvScroll(scroll);
+            }
+        }
     }
 
     private void ToggleBottomPanels()
     {
         if (_composerPanel is null) return;
         CloseFlyout();
-        FinishAnimation();
-        // 规格：━ 按钮隐藏/恢复设置区与发送区；标题在 ■ / ━ 间切换
+        // 只隐藏发送文本框，保留设置行，━/■ 按钮始终可点。
         bool show = !_composerShown;
         _composerShown = show;
         _collapseButton.Text = show ? "━" : "■";
-        if (AnimationsEnabled)
-        {
-            AnimateComposer(show);
-            return;
-        }
-        _composerPanel.Visible = show;
+        _rowTip.SetToolTip(_collapseButton, show ? "收起发送区" : "展开发送区");
+        UpdateComposerGridRows();
         UpdateComposerLayout();
         UpdateMinimumHeight();
     }
@@ -2450,12 +2556,23 @@ public sealed partial class MainForm : Form
         _rxRateLabel.ForeColor = Theme.Accent;
         _txRateLabel.ForeColor = Theme.StatusSend;
         _bufferLabel.ForeColor = Theme.Muted;
-        _sparkline.BackColor = Theme.Surface2;
-        _sparkline.Invalidate();
         if (_recvBox.ContextMenuStrip is ContextMenuStrip logMenu) Theme.StyleContextMenu(logMenu);
         RenderLogAll();
         StatusTick();
         UpdateStatus();
+    }
+
+    /// <summary>下拉里可能带“COM38 · USB 串行设备”描述，逻辑和 ini 只用端口名。</summary>
+    private string SelectedSerialPortName()
+    {
+        string normalized = ComPortService.NormalizePortName(_portCombo.Text);
+        return normalized.Length > 0 ? normalized : _portCombo.Text;
+    }
+
+    private void SyncPortField()
+    {
+        if (_portField is null || _portCombo is null) return;
+        _portField.SetDisplay(_portCombo.Text);
     }
 
     private void UpdateStatus()
@@ -2464,7 +2581,7 @@ public sealed partial class MainForm : Form
         {
             bool open = _port.IsOpen;
             string state = open ? " 已打开 " : " 已关闭 ";
-            string portName = open ? _port.OpenedPortName : (_portCombo.Text.Length > 0 ? _portCombo.Text : "");
+            string portName = open ? _port.OpenedPortName : SelectedSerialPortName();
             int baud = ComPortService.BaudValueOf(_baudCombo.SelectedIndex, _port.CustomBaud);
             string baudText = _baudCombo.SelectedIndex <= 0 ? baud.ToString() : _baudCombo.Text;
             _connStatus.Text = $"{portName}{state}{baudText}bps,{_port.LineDescription()}";
@@ -2472,8 +2589,8 @@ public sealed partial class MainForm : Form
                 _logTitleLabel.Text = portName.Length > 0 ? portName : "未选择端口";
             if (_logSubLabel is not null)
                 _logSubLabel.Text = $"{baudText}bps · {_port.LineDescription()}";
-            if (_lineInfoLabel is not null)
-                _lineInfoLabel.Text = open ? $"已打开 · {baudText}bps" : "未打开";
+            _sideStatusCard?.SetStatus(open, open ? "已打开" : "未打开",
+                $"{baudText} bps · {_port.LineDescription()}");
             if (_sideModeLabel is not null) _sideModeLabel.Text = "串口";
         }
         else
@@ -2483,12 +2600,13 @@ public sealed partial class MainForm : Form
             if (_logTitleLabel is not null) _logTitleLabel.Text = _portCombo.Text;
             if (_logSubLabel is not null)
                 _logSubLabel.Text = $"{_remoteIpBox.Text}:{_remotePortBox.Text} · {(_net.Ready ? "已连接" : "未连接")}";
+            _sideStatusCard?.SetStatus(_net.Ready, _net.Ready ? "已连接" : "未连接",
+                $"{_portCombo.Text} · {_remoteIpBox.Text}:{_remotePortBox.Text}");
             if (_sideModeLabel is not null) _sideModeLabel.Text = "网络";
         }
         _sentStatus.Text = $"S:{Interlocked.Read(ref _sentCount)}";
         _recvStatus.Text = $"R:{Interlocked.Read(ref _recvCount)}";
         _openButton.Text = _port.IsOpen ? "关闭串口" : "打开串口";
-        UpdateSidebarRail();
         RefreshLogHeaderLayout();
     }
 
@@ -2800,7 +2918,7 @@ public sealed partial class MainForm : Form
                 NetMode.TcpClient => "1",
                 NetMode.TcpServer => "2",
                 NetMode.Udp => "3",
-                _ => _portCombo.Text.Length > 0 ? _portCombo.Text : "COM1",
+                _ => SelectedSerialPortName() is { Length: > 0 } name ? name : "COM1",
             },
             Baud = ComPortService.BaudValueOf(_baudCombo.SelectedIndex, _port.CustomBaud).ToString(),
             FormWidth = savedBounds.Width,
@@ -2979,12 +3097,26 @@ public sealed partial class MainForm : Form
                 break;
             default:
                 string name = portName.Length > 0 ? portName : "COM1";
+                string normalized = ComPortService.NormalizePortName(name);
                 _portCombo.Text = name;
+                int comboMatch = -1;
+                for (int i = 0; i < _portCombo.Items.Count; i++)
+                {
+                    if (ComPortService.NormalizePortName(_portCombo.Items[i]?.ToString() ?? "") == normalized)
+                    {
+                        comboMatch = i;
+                        break;
+                    }
+                }
+                if (comboMatch >= 0)
+                {
+                    _portCombo.Text = _portCombo.Items[comboMatch]?.ToString() ?? name;
+                    _portCombo.SelectedIndex = comboMatch;
+                }
                 int match = -1;
                 for (int i = 0; i < _comMenuItems.Count; i++)
                 {
-                    if (ComPortService.NormalizePortName(_comMenuItems[i].Text ?? "") ==
-                        ComPortService.NormalizePortName(name))
+                    if (ComPortService.NormalizePortName(_comMenuItems[i].Text ?? "") == normalized)
                     {
                         match = i;
                         break;
@@ -2993,6 +3125,8 @@ public sealed partial class MainForm : Form
                 if (match >= 0) _comMenuItems[match].Checked = true;
                 break;
         }
+        DetectMode();
+        SyncPortField();
     }
 
     private void ApplyWindowGeometry(IniSnapshot snap)

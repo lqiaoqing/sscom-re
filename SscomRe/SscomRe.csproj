@@ -12,8 +12,9 @@
     <AssemblyTitle>SSCOM 重写版</AssemblyTitle>
     <Product>SSCOM 重写版</Product>
     <Description>串口/网络数据调试器（依据 sscom5.13.1 行为规格的 C# WinForms 重写）</Description>
-    <Version>1.0.0</Version>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
   </PropertyGroup>
 
 </Project>

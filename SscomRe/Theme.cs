@@ -455,6 +455,11 @@ internal static class Theme
                 button.ForeColor = Muted;
                 button.Invalidate();
                 break;
+            case ThemeCheckChip chip:
+                chip.BackColor = Surface2;
+                chip.ForeColor = Muted;
+                chip.Invalidate();
+                break;
             case ThemeCheckBox check:
                 check.ForeColor = Muted;
                 check.Invalidate();

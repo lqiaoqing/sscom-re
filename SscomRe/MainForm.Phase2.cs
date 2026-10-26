@@ -46,7 +46,7 @@ public sealed partial class MainForm
             row++;
         }
 
-        int headerButton = Math.Max(30, Font.Height + 8);
+        int headerButton = Math.Max(Theme.Scale(this, 30), Font.Height + 10);
         var head = new TableLayoutPanel
         {
             ColumnCount = 2,
@@ -65,7 +65,7 @@ public sealed partial class MainForm
         {
             AutoSize = true,
             WrapContents = false,
-            Dock = DockStyle.Top,
+            Anchor = AnchorStyles.Left,
             BackColor = Theme.Surface2,
             Margin = new Padding(0),
             Padding = new Padding(0),
@@ -78,83 +78,54 @@ public sealed partial class MainForm
             Font = new Font(Font.FontFamily, Font.Size + 1F, FontStyle.Bold),
             Margin = new Padding(0, 0, 8, 0),
         });
-        _sideModeLabel = new Label
+        _sideModeLabel = new ThemeChip
         {
             Text = "串口",
-            AutoSize = true,
-            ForeColor = Theme.Muted,
-            Margin = new Padding(0, 2, 0, 0),
+            Width = Theme.Scale(this, 52),
+            Height = Theme.Scale(this, 24),
+            Margin = new Padding(0),
         };
         headText.Controls.Add(_sideModeLabel);
-        var collapse = new ThemeButton
+        var refresh = new ThemeButton
         {
-            Text = "«",
+            Text = "↻",
             Width = headerButton,
             Height = headerButton,
             Kind = ThemeButton.ButtonKind.Icon,
             Anchor = AnchorStyles.Right,
             Margin = new Padding(0),
         };
-        collapse.Click += (_, _) => SetSidebarCollapsed(true, persist: true, manual: true, automatic: false);
-        _rowTip.SetToolTip(collapse, "收起连接栏");
-        head.Controls.Add(headText, 0, 0);
-        head.Controls.Add(collapse, 1, 0);
-        Add(head, 7);
-
-        Add(SideLabel("端口号"), 3);
-        var portRow = new TableLayoutPanel
-        {
-            ColumnCount = 2,
-            RowCount = 1,
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            BackColor = Theme.Surface2,
-            Margin = new Padding(0),
-        };
-        int refreshSize = Math.Max(30, Font.Height + 10);
-        portRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        portRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, refreshSize + 4));
-        _portCombo = new ThemeComboBox
-        {
-            Dock = DockStyle.Top,
-            DropDownStyle = ComboBoxStyle.DropDown,
-            Margin = new Padding(0),
-        };
-        var refresh = new ThemeButton
-        {
-            Text = "↻",
-            Dock = DockStyle.Top,
-            Width = refreshSize,
-            Height = refreshSize,
-            Kind = ThemeButton.ButtonKind.Icon,
-            Margin = new Padding(4, 0, 0, 0),
-        };
         refresh.Click += (_, _) => RefreshPortList();
         _rowTip.SetToolTip(refresh, "刷新串口列表");
-        portRow.Controls.Add(_portCombo, 0, 0);
-        portRow.Controls.Add(refresh, 1, 0);
-        Add(portRow, 8);
+        head.Controls.Add(headText, 0, 0);
+        head.Controls.Add(refresh, 1, 0);
+        Add(head, 9);
+        Add(new Panel { Height = 1, BackColor = Theme.BorderSoft, Margin = new Padding(0) }, 9);
+
+        Add(SideLabel("端口号"), 6);
+        _portCombo = new ThemeComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDown,
+            Visible = false,
+            TabStop = false,
+            Location = new Point(-200, -200),
+            Size = new Size(1, 1),
+        };
+        Controls.Add(_portCombo);
+        _portField = new PortField { Height = Theme.Scale(this, 46) };
+        _rowTip.SetToolTip(_portField, "点击选择端口；F2 手动输入");
+        Add(_portField, 10);
 
         _serialSection = BuildSerialSection();
         _netSection = BuildNetSection();
         Add(_serialSection, 0);
         Add(_netSection, 0);
 
-        Add(new Label
-        {
-            Text = "SSCOM 重写版 · C#",
-            AutoSize = true,
-            ForeColor = Theme.Dim,
-            Margin = new Padding(0, 12, 0, 0),
-        }, 0);
-
         _sideContent = layout;
-        _railPanel = BuildRail();
         _sidePanel.Controls.Add(layout);
-        _sidePanel.Controls.Add(_railPanel);
-        _railPanel.Visible = _sideCollapsed;
         layout.Visible = !_sideCollapsed;
+        _sidePanel.Visible = !_sideCollapsed;
+        _sidePanel.AutoScroll = !_sideCollapsed;
         _sidePanel.Resize += (_, _) => FitSidebar(layout);
         _sidePanel.Layout += (_, _) => FitSidebar(layout);
         return _sidePanel;
@@ -162,110 +133,17 @@ public sealed partial class MainForm
 
     private void FitSidebar(Control layout)
     {
-        if (_sidePanel is null || _sideContent is null || !_sideContent.Visible) return;
+        if (_sidePanel is null || _sideContent is null || !_sidePanel.Visible) return;
         int scroll = _sidePanel.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
         int width = Math.Max(160, _sidePanel.ClientSize.Width - scroll);
         if (layout.Width != width) layout.Width = width;
-    }
-
-    private int RailWidth() => Math.Max(48, Theme.Scale(this, 52));
-
-    private int RailButtonHeight() => Math.Max(34, Font.Height + 10);
-
-    private Panel BuildRail()
-    {
-        var rail = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface2 };
-        var table = new TableLayoutPanel
-        {
-            ColumnCount = 1,
-            Dock = DockStyle.Fill,
-            BackColor = Theme.Surface2,
-            Padding = new Padding(4, 8, 4, 6),
-            Margin = new Padding(0),
-        };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        int row = 0;
-        void Add(Control control, int gap = 6)
-        {
-            control.Dock = DockStyle.Top;
-            control.Margin = new Padding(0, 0, 0, gap);
-            table.RowCount = row + 1;
-            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            table.Controls.Add(control, 0, row);
-            row++;
-        }
-
-        _railExpand = new ThemeButton
-        {
-            Text = "»",
-            Height = RailButtonHeight(),
-            Kind = ThemeButton.ButtonKind.Icon,
-        };
-        _railExpand.Click += (_, _) => SetSidebarCollapsed(false, persist: true, manual: true, automatic: false);
-        _rowTip.SetToolTip(_railExpand, "展开连接栏");
-        Add(_railExpand, 8);
-
-        _railDot = new Label
-        {
-            Text = "●",
-            AutoSize = false,
-            Height = Math.Max(16, Font.Height - 6),
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Theme.Green,
-            BackColor = Color.Transparent,
-        };
-        Add(_railDot, 2);
-        _railModeLabel = new Label
-        {
-            Text = "串口",
-            AutoSize = false,
-            Height = Font.Height + 2,
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Theme.Muted,
-            BackColor = Color.Transparent,
-        };
-        Add(_railModeLabel, 2);
-        _railPortLabel = new Label
-        {
-            Text = "COM1",
-            AutoSize = false,
-            Height = Font.Height + 2,
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Theme.Text,
-            AutoEllipsis = true,
-            BackColor = Color.Transparent,
-        };
-        Add(_railPortLabel, 10);
-        _railOpen = new ThemeButton { Text = "开", Height = RailButtonHeight() };
-        _railOpen.Click += (_, _) => ToggleOpen();
-        Add(_railOpen, 0);
-
-        rail.Controls.Add(table);
-        return rail;
-    }
-
-    private void UpdateSidebarRail()
-    {
-        if (_railOpen is null) return;
-        bool serial = _netMode == NetMode.Serial;
-        bool connected = serial ? _port.IsOpen : _net.Ready;
-        _railDot.ForeColor = connected ? Theme.Green : Theme.Dim;
-        _railModeLabel.Text = serial ? "串口" : "网络";
-        string port = serial
-            ? (_port.IsOpen ? _port.OpenedPortName : ComPortService.NormalizePortName(_portCombo.Text))
-            : _portCombo.Text;
-        _railPortLabel.Text = port.Length > 0 ? port : "—";
-        _railModeLabel.ForeColor = Theme.Muted;
-        _railPortLabel.ForeColor = Theme.Text;
-        _railOpen.Visible = serial;
-        _railOpen.Text = _port.IsOpen ? "关" : "开";
-        _rowTip.SetToolTip(_railOpen, _port.IsOpen ? "关闭串口" : "打开串口");
     }
 
     private void SetSidebarCollapsed(bool collapsed, bool persist, bool manual, bool automatic)
     {
         if (_sidePanel is null) return;
         CloseFlyout();
+        ClosePortPopup(false);
         _sideCollapsed = collapsed;
         if (manual)
         {
@@ -281,31 +159,174 @@ public sealed partial class MainForm
         {
             _sideAutoCollapsed = false;
         }
-        if (manual && IsHandleCreated && _bodyLayout is not null)
-        {
-            FinishAnimation();
-            // 过渡期间显示展开内容，让栏宽变化看起来像滑入/滑出；结束时再切 rail。
-            if (_sideContent is not null) _sideContent.Visible = true;
-            if (_railPanel is not null) _railPanel.Visible = false;
-            _sidePanel.AutoScroll = true;
-            int from = (int)Math.Round(_bodyLayout.ColumnStyles[0].Width);
-            if (from <= 0) from = collapsed ? SidebarWidth() : RailWidth();
-            UpdateSidebarRail();
-            AnimateSidebar(from, collapsed ? RailWidth() : SidebarWidth(), collapsed);
-        }
-        else
-        {
-            if (_sideContent is not null) _sideContent.Visible = !collapsed;
-            if (_railPanel is not null) _railPanel.Visible = collapsed;
-            _sidePanel.AutoScroll = !collapsed;
-            if (_bodyLayout is not null)
-                _bodyLayout.ColumnStyles[0].Width = collapsed ? RailWidth() : SidebarWidth();
-            _sidePanel.PerformLayout();
-            _bodyLayout?.PerformLayout();
-            UpdateSidebarRail();
-        }
-        if (persist) AutoSave();
+        ApplySidebarState();
+        // N1093 防抖落盘，别让同步写整份 ini 卡住点击。
+        if (persist) ScheduleAutoSave();
     }
+
+    private void ApplySidebarState()
+    {
+        if (_sidePanel is null) return;
+        bool collapsed = _sideCollapsed;
+        bool freezeLog = _recvBox is { IsHandleCreated: true };
+        bool followBottom = freezeLog && _autoFollow && RecvAtBottom();
+        Point scroll = freezeLog ? GetRecvScroll() : Point.Empty;
+        if (freezeLog) SendMessage(_recvBox.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+        bool drawerOpen = _split is { Panel2Collapsed: false };
+
+        _sidePanel.SuspendLayout();
+        _bodyLayout?.SuspendLayout();
+        _split?.SuspendLayout();
+        _adjustingSplit = true;
+        try
+        {
+            _sidePanel.Visible = !collapsed;
+            _sidePanel.AutoScroll = !collapsed;
+            if (_sideContent is not null) _sideContent.Visible = !collapsed;
+            if (_bodyLayout is not null)
+            {
+                _bodyLayout.ColumnStyles[0].Width = collapsed ? 0 : _sideWidth;
+                _bodyLayout.ColumnStyles[1].Width = collapsed ? 0 : SideSplitterThickness();
+            }
+            if (_sideSplitter is not null) _sideSplitter.Visible = !collapsed;
+        }
+        finally
+        {
+            _bodyLayout?.ResumeLayout(true);
+            _split?.ResumeLayout(true);
+            _sidePanel.ResumeLayout(true);
+            _adjustingSplit = false;
+            if (drawerOpen) ApplyMultiWidth();
+            _bodyLayout?.PerformLayout();
+            if (!collapsed) FitSidebar(_sideContent);
+            UpdateSidebarToggle();
+            if (_centerLayout is not null) UpdateLogHeaderResponsive();
+            if (freezeLog)
+            {
+                SendMessage(_recvBox.Handle, WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+                _recvBox.Invalidate();
+                if (followBottom)
+                {
+                    _recvBox.SelectionStart = _recvBox.TextLength;
+                    _recvBox.SelectionLength = 0;
+                    _recvBox.ScrollToCaret();
+                }
+                else
+                {
+                    SetRecvScroll(scroll);
+                }
+            }
+        }
+    }
+
+    private void UpdateSidebarToggle()
+    {
+        if (_sidebarToggle is null) return;
+        _sidebarToggle.Text = _sideCollapsed ? "»" : "«";
+        _rowTip.SetToolTip(_sidebarToggle, _sideCollapsed ? "展开连接栏" : "收起连接栏");
+    }
+
+    private void BuildPortPopup()
+    {
+        _portPopup = new PortPopup { Font = Font };
+        _portPopup.ItemChosen += ChoosePortFromPopup;
+        _portPopup.Dismissed += () => ClosePortPopup(true);
+        Controls.Add(_portPopup);
+        _portPopupFilter = new PortPopupDismissFilter(this);
+        Application.AddMessageFilter(_portPopupFilter);
+        FormClosed += (_, _) =>
+        {
+            if (_portPopupFilter is null) return;
+            Application.RemoveMessageFilter(_portPopupFilter);
+            _portPopupFilter = null;
+        };
+    }
+
+    private void TogglePortPopup()
+    {
+        if (_portPopup is null) return;
+        if (_portPopup.Visible)
+        {
+            ClosePortPopup(true);
+            return;
+        }
+        CloseFlyout();
+        _portPopup.Width = Math.Max(Theme.Scale(this, 250), _portField.Width);
+        string[] items = _portCombo.Items.Cast<object?>()
+            .Select(item => item?.ToString() ?? "").ToArray();
+        _portPopup.SetItems(items, _portCombo.SelectedIndex);
+
+        Point below = _portField.PointToScreen(new Point(0, _portField.Height + Theme.Scale(this, 4)));
+        Point position = PointToClient(below);
+        int margin = Theme.Scale(this, 8);
+        int bottomLimit = ClientSize.Height - (_statusStrip?.Height ?? 0) - margin;
+        if (position.Y + _portPopup.Height > bottomLimit)
+        {
+            Point above = _portField.PointToScreen(Point.Empty);
+            position.Y = Math.Max(margin,
+                PointToClient(above).Y - _portPopup.Height - Theme.Scale(this, 4));
+        }
+        position.X = Math.Max(margin,
+            Math.Min(position.X, ClientSize.Width - _portPopup.Width - margin));
+        _portPopup.Location = position;
+        _portPopup.Visible = true;
+        _portPopup.BringToFront();
+        _portField.Opened = true;
+        _portField.Invalidate();
+        _portPopup.Focus();
+    }
+
+    private void ClosePortPopup(bool focusField)
+    {
+        if (_portPopup is null || !_portPopup.Visible) return;
+        _portPopup.Visible = false;
+        _portField.Opened = false;
+        _portField.Invalidate();
+        if (focusField && _portField.CanFocus) _portField.Focus();
+    }
+
+    private void ChoosePortFromPopup(int index)
+    {
+        if (index < 0 || index >= _portCombo.Items.Count) return;
+        bool same = _portCombo.SelectedIndex == index;
+        ClosePortPopup(true);
+        string item = _portCombo.Items[index]?.ToString() ?? _portCombo.Text;
+        _portCombo.Text = item;
+        _portCombo.SelectedIndex = index;
+        DetectMode();
+        SyncPortField();
+        SchedulePortReopen();
+    }
+
+    private void CommitManualPort(string text)
+    {
+        ClosePortPopup(false);
+        _portCombo.SelectedIndex = -1;
+        _portCombo.Text = text;
+        DetectMode();
+        SyncPortField();
+        SchedulePortReopen();
+    }
+
+    internal void SetSidebarCollapsedForTest(bool collapsed) =>
+        SetSidebarCollapsed(collapsed, persist: false, manual: true, automatic: false);
+
+    internal bool SidebarCollapsedForTest => _sideCollapsed;
+    internal bool SidebarVisibleForTest => _sidePanel?.Visible == true;
+    internal int SidebarColumnWidthForTest => (int)Math.Round(_bodyLayout?.ColumnStyles[0].Width ?? -1);
+    internal int SidebarExpandedWidthForTest => _sideWidth;
+    internal bool SidebarToggleVisibleForTest => _sidebarToggle?.Visible == true;
+    internal string SidebarToggleTextForTest => _sidebarToggle?.Text ?? "";
+    internal bool LogTitleVisibleForTest => _logTitleLabel is { Visible: true };
+    internal string[] PortComboItemsForTest =>
+        _portCombo.Items.Cast<object?>().Select(item => item?.ToString() ?? "").ToArray();
+    internal int PortFieldWidthForTest => _portField?.Width ?? -1;
+    internal int BaudComboWidthForTest => _baudCombo.Width;
+    internal string PortFieldTextForTest => _portField?.DisplayText ?? "";
+    internal string PortComboTextForTest => _portCombo?.Text ?? "";
+    internal void OpenPortPopupForTest() => TogglePortPopup();
+    internal void ClosePortPopupForTest() => ClosePortPopup(false);
+    internal bool PortPopupVisibleForTest => _portPopup?.Visible == true;
 
     private TableLayoutPanel BuildSerialSection()
     {
@@ -331,13 +352,40 @@ public sealed partial class MainForm
             row++;
         }
 
-        Add(SideSectionTitle("线路参数"), 4);
-        Add(SideLabel("波特率"), 3);
+        var sectionHead = new TableLayoutPanel
+        {
+            ColumnCount = 2,
+            RowCount = 1,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Surface2,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        sectionHead.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        sectionHead.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        sectionHead.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var sectionTitle = SideSectionTitle("线路参数");
+        sectionTitle.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+        sectionHead.Controls.Add(sectionTitle, 0, 0);
+        sectionHead.Controls.Add(new Label
+        {
+            Text = "下次打开生效",
+            AutoSize = true,
+            ForeColor = Theme.Dim,
+            Font = new Font(Font.FontFamily, Math.Max(7.5F, Font.Size - 1.5F)),
+            Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
+            Margin = new Padding(0),
+        }, 1, 0);
+        Add(sectionHead, 6);
+
+        Add(SideLabel("波特率"), 6);
         int unit = TextUnit();
         _baudCombo = new ThemeComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList };
         foreach (var b in ComPortService.BaudItems) _baudCombo.Items.Add(b);
         _baudCombo.SelectedIndex = 13;
-        Add(_baudCombo, 6);
+        Add(_baudCombo, 12);
 
         _customBaudBox = new ThemeTextBox { Text = _port.CustomBaud.ToString(), Visible = false };
         _customBaudBox.VisibleChanged += (_, _) =>
@@ -345,47 +393,60 @@ public sealed partial class MainForm
             _serialSection?.PerformLayout();
             ScheduleResponsiveRelayout();
         };
-        Add(_customBaudBox, 5);
+        Add(_customBaudBox, 6);
 
-        _rtsBox = new ThemeCheckBox { Text = "RTS", AutoSize = true };
-        _dtrBox = new ThemeCheckBox { Text = "DTR", AutoSize = true };
+        Add(new Panel { Height = Theme.Scale(this, 4), BackColor = Theme.Surface2, Margin = new Padding(0) }, 4);
+        int chipH = Math.Max(Theme.Scale(this, 30), Font.Height + Theme.Scale(this, 6));
+        int chipW = Math.Max(Theme.Scale(this, 80),
+            TextRenderer.MeasureText("RTS", Font).Width + Theme.Scale(this, 56));
         var flags = new FlowLayoutPanel
         {
             AutoSize = true,
-            WrapContents = true,
+            WrapContents = false,
             Dock = DockStyle.Top,
             BackColor = Theme.Surface2,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        _rtsBox = new ThemeCheckChip
+        {
+            Text = "RTS",
+            Width = chipW,
+            Height = chipH,
+            Margin = new Padding(0, 0, Theme.Scale(this, 10), 0),
+        };
+        _dtrBox = new ThemeCheckChip
+        {
+            Text = "DTR",
+            Width = chipW,
+            Height = chipH,
             Margin = new Padding(0),
         };
         flags.Controls.Add(_rtsBox);
         flags.Controls.Add(_dtrBox);
-        Add(flags, 5);
+        Add(flags, 12);
 
-        _lineInfoLabel = new Label
-        {
-            Text = "未打开",
-            AutoSize = true,
-            ForeColor = Theme.Muted,
-            Margin = new Padding(0, 0, 0, 6),
-        };
-        Add(_lineInfoLabel, 4);
+        _sideStatusCard = new SideStatusCard { Height = Theme.Scale(this, 48) };
+        Add(_sideStatusCard, 14);
 
-        int buttonH = Math.Max(30, Font.Height + 12);
+        int buttonH = Math.Max(Theme.Scale(this, 42), Font.Height + Theme.Scale(this, 18));
         _openButton = new ThemeButton
         {
             Text = "打开串口",
             Dock = DockStyle.Top,
             Height = buttonH,
             Kind = ThemeButton.ButtonKind.Primary,
-            Margin = new Padding(0, 0, 0, 4),
+            Margin = new Padding(0, 0, 0, 8),
         };
-        Add(_openButton, 4);
+        Add(_openButton, 8);
+
+        Add(new Panel { Height = 1, BackColor = Theme.BorderSoft, Margin = new Padding(0) }, 4);
 
         _moreSettingsButton = new ThemeButton
         {
             Text = "更多串口设置",
             Dock = DockStyle.Top,
-            Height = buttonH,
+            Height = Theme.Scale(this, 38),
             Margin = new Padding(0),
         };
         _moreSettingsButton.Click += (_, _) => ShowPortSettings();
@@ -537,7 +598,7 @@ public sealed partial class MainForm
         _split.Panel2Collapsed = true;
         _split.Resize += (_, _) =>
         {
-            if (!_split.Panel2Collapsed && !_animatingSplit) ApplyMultiWidth();
+            if (!_split.Panel2Collapsed && !_adjustingSplit) ApplyMultiWidth();
         };
         _split.SplitterMoving += (_, _) =>
         {
@@ -600,8 +661,22 @@ public sealed partial class MainForm
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0),
         };
+        int toggleSize = Math.Max(28, Font.Height + 10);
+        _sidebarToggle = new ThemeButton
+        {
+            Text = "«",
+            AutoSize = false,
+            Width = toggleSize,
+            Height = toggleSize,
+            Kind = ThemeButton.ButtonKind.Icon,
+            Margin = new Padding(0, 0, 4, 0),
+        };
+        _sidebarToggle.Click += (_, _) =>
+            SetSidebarCollapsed(!_sideCollapsed, persist: true, manual: true, automatic: false);
+        labels.Controls.Add(_sidebarToggle);
         labels.Controls.Add(_logTitleLabel);
         labels.Controls.Add(_logSubLabel);
+        UpdateSidebarToggle();
         bar.Controls.Add(labels, 0, 0);
 
         var actions = new RowFlowPanel
@@ -721,7 +796,6 @@ public sealed partial class MainForm
 
     private int ComposerHeight()
     {
-        if (_composerPanel is { Visible: false }) return 0;
         return _composerHeight;
     }
 
@@ -729,15 +803,15 @@ public sealed partial class MainForm
     {
         if (_composerGrid is null || _settingsRow1 is null) return;
         int row0 = RowHeightOf(_settingsRow1);
-        int row1 = SendAreaHeight();
+        int row1 = _composerShown ? SendAreaHeight() : 0;
         _composerHeight = row0 + row1 + 1;
+        if (_sendArea is not null) _sendArea.Visible = _composerShown;
         SetComposerRow(0, row0);
         SetComposerRow(1, row1);
-        if (!_animatingComposer && _centerLayout is not null && _centerLayout.RowStyles.Count > 2)
+        if (_centerLayout is not null && _centerLayout.RowStyles.Count > 2)
         {
-            float height = _composerPanel is { Visible: true } ? _composerHeight : 0;
             RowStyle style = _centerLayout.RowStyles[2];
-            if (Math.Abs(style.Height - height) > 0.5f) style.Height = height;
+            if (Math.Abs(style.Height - _composerHeight) > 0.5f) style.Height = _composerHeight;
         }
     }
 
@@ -867,11 +941,14 @@ public sealed partial class MainForm
         Add(FlyoutDivider(), 12);
 
         int unit = TextUnit();
-        _verifyNumEdit = new ThemeTextBox { Text = "1", Width = unit * 3 };
+        Add(FlyoutLabel("帧尾位置"), 4);
+        _verifyNumEdit = new ThemeTextBox { Text = "1", Width = unit * 4 };
+        Add(FlyoutRow(inner, FlyoutLabel("第"), _verifyNumEdit, FlyoutLabel("字节至")), 6);
+
         _tailCombo = new ThemeComboBox
         {
-            Width = unit * 18,
-            DropDownWidth = unit * 42,
+            Dock = DockStyle.Top,
+            DropDownWidth = Math.Max(inner, Theme.Scale(this, 320)),
             DropDownStyle = ComboBoxStyle.DropDownList,
         };
         _tailCombo.Items.AddRange(new object[]
@@ -883,13 +960,43 @@ public sealed partial class MainForm
             "第-4 (最后4个字节是帧尾,校验插在帧尾前面)",
         });
         _tailCombo.SelectedIndex = 0;
-        Add(FlyoutRow(inner, FlyoutLabel("第"), _verifyNumEdit, FlyoutLabel("字节至"), _tailCombo), 10);
+        Add(_tailCombo, 12);
 
-        _verifyBox = new ThemeComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDownList };
+        Add(FlyoutLabel("加校验"), 4);
+        int fieldH = Math.Max(Theme.Scale(this, 30), Font.Height + Theme.Scale(this, 10));
+        var verifyFields = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = fieldH,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = Theme.Surface,
+        };
+        verifyFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+        verifyFields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+        verifyFields.RowStyles.Add(new RowStyle(SizeType.Absolute, fieldH));
+        _verifyBox = new ThemeComboBox
+        {
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, Theme.Scale(this, 6), 0),
+            DropDownStyle = ComboBoxStyle.DropDownList,
+        };
         _verifyBox.Items.AddRange(new object[] { "None", "ModbusCRC16", "CCITT-CRC16", "CRC32", "0-ADD8", "ADD8", "XOR8", "ADD16" });
         _verifyBox.SelectedIndex = 0;
-        _crcBox = new ThemeTextBox { Width = unit * 8, ReadOnly = true, TabStop = false, ForeColor = Theme.Accent, PlaceholderText = "CRC" };
-        Add(FlyoutRow(inner, FlyoutLabel("加校验"), _verifyBox, _crcBox), 8);
+        _crcBox = new ThemeTextBox
+        {
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0),
+            ReadOnly = true,
+            TabStop = false,
+            ForeColor = Theme.Accent,
+            PlaceholderText = "CRC",
+        };
+        verifyFields.Controls.Add(_verifyBox, 0, 0);
+        verifyFields.Controls.Add(_crcBox, 1, 0);
+        Add(verifyFields, 8);
         Add(FlyoutHint("None 表示不校验；校验值按所选算法实时计算。", inner), 0);
 
         body.Controls.Add(content);
@@ -1025,6 +1132,7 @@ public sealed partial class MainForm
 
     private void ShowFlyout(Panel flyout, Control anchor)
     {
+        ClosePortPopup(false);
         CloseFlyout();
         if (flyout.Tag is not TableLayoutPanel content) return;
         int logicalWidth = ReferenceEquals(flyout, _sendSettingsFlyout) ? 380 : 340;
@@ -1077,6 +1185,11 @@ public sealed partial class MainForm
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
+        if (keyData == Keys.Escape && _portPopup is { Visible: true })
+        {
+            ClosePortPopup(true);
+            return true;
+        }
         if (keyData == Keys.Escape && _openFlyout is not null &&
             !(_tailCombo?.DroppedDown ?? false) && !(_verifyBox?.DroppedDown ?? false))
         {
@@ -1090,8 +1203,48 @@ public sealed partial class MainForm
     {
         // 切到其它应用时关闭浮层；同进程的下拉/对话框不会触发 WM_ACTIVATEAPP。
         const int WM_ACTIVATEAPP = 0x001C;
-        if (m.Msg == WM_ACTIVATEAPP && m.WParam == IntPtr.Zero) CloseFlyout();
+        if (m.Msg == WM_ACTIVATEAPP && m.WParam == IntPtr.Zero)
+        {
+            CloseFlyout();
+            ClosePortPopup(false);
+        }
         base.WndProc(ref m);
+    }
+
+    private sealed class PortPopupDismissFilter : IMessageFilter
+    {
+        private const int WM_LBUTTONDOWN = 0x0201;
+        private const int WM_RBUTTONDOWN = 0x0204;
+        private const int WM_MBUTTONDOWN = 0x0207;
+        private const int WM_NCLBUTTONDOWN = 0x00A1;
+        private const int WM_NCRBUTTONDOWN = 0x00A4;
+        private const uint GA_ROOT = 2;
+
+        private readonly MainForm _form;
+
+        public PortPopupDismissFilter(MainForm form) => _form = form;
+
+        public bool PreFilterMessage(ref Message m)
+        {
+            PortPopup? popup = _form._portPopup;
+            if (popup is null || !popup.Visible) return false;
+            if (m.Msg is not (WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN or
+                WM_NCLBUTTONDOWN or WM_NCRBUTTONDOWN)) return false;
+
+            Control? control = Control.FromHandle(m.HWnd);
+            if (control is not null)
+            {
+                if (ReferenceEquals(control, popup) || popup.Contains(control)) return false;
+                if (ReferenceEquals(control, _form._portField) || _form._portField.Contains(control)) return false;
+                if (ReferenceEquals(control.TopLevelControl, _form)) _form.ClosePortPopup(false);
+                return false;
+            }
+            if (GetAncestor(m.HWnd, GA_ROOT) == _form.Handle) _form.ClosePortPopup(false);
+            return false;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     }
 
     private sealed class FlyoutDismissFilter : IMessageFilter

@@ -253,7 +253,7 @@ public sealed partial class MainForm
 
     private void RateTick()
     {
-        if (IsDisposed || _sparkline is null) return;
+        if (IsDisposed) return;
         long sent = Interlocked.Read(ref _sentCount);
         long recv = Interlocked.Read(ref _recvCount);
         if (sent < _lastSentSample) _lastSentSample = sent;
@@ -264,9 +264,6 @@ public sealed partial class MainForm
         _lastSentSample = sent;
         _lastRecvSample = recv;
 
-        _rxRateSamples.Add((float)rx);
-        while (_rxRateSamples.Count > 24) _rxRateSamples.RemoveAt(0);
-        _sparkline.SetValues(_rxRateSamples.ToArray());
         _rxRateLabel.Text = "RX " + RateText(rx);
         _txRateLabel.Text = "TX " + RateText(tx);
         long used = Math.Min(_receive.Counter, Math.Max(1, _receive.Limit));
@@ -328,6 +325,8 @@ public sealed partial class MainForm
     }
 
     internal int LogTextLengthForBenchmark => _recvBox.TextLength;
+    internal bool RecvAtBottomForTest() => RecvAtBottom();
+    internal void AppendLogForTest(string text) => AppendRecv(text);
 
     internal bool SearchForTest(string query)
     {

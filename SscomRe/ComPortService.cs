@@ -1,4 +1,5 @@
 using System.IO.Ports;
+using Microsoft.Win32;
 
 namespace SscomRe;
 
@@ -73,6 +74,97 @@ public sealed class ComPortService : IDisposable
         1 => Handshake.XOnXOff,                              // SoftWare
         _ => Handshake.None,                                 // None / Custom（自定义流控留待“更多串口设置”）
     };
+
+    /// <summary>给端口下拉用的显示文本：COM38 · USB 串行设备。</summary>
+    public static string FormatPortChoice(string? portName, string? description)
+    {
+        string name = NormalizePortName(portName ?? "");
+        if (name.Length == 0) name = (portName ?? "").Trim();
+        string suffix = description?.Trim() ?? "";
+        if (name.Length == 0) return suffix;
+        return suffix.Length == 0 ? name : $"{name} · {suffix}";
+    }
+
+    /// <summary>
+    /// 从设备枚举注册表读 COM 口描述（USB/ACPI/ROOT），不调用 WMI。
+    /// 返回的键已经 NormalizePortName；读不到描述时对应值为空串。
+    /// </summary>
+    public static Dictionary<string, string> PortDescriptions()
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            RegistryKey baseKey = RegistryKey.OpenBaseKey(
+                RegistryHive.LocalMachine,
+                Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Default);
+            try
+            {
+                foreach (string branch in new[]
+                {
+                    @"SYSTEM\CurrentControlSet\Enum\USB",
+                    @"SYSTEM\CurrentControlSet\Enum\ACPI",
+                    @"SYSTEM\CurrentControlSet\Enum\ROOT",
+                })
+                {
+                    using RegistryKey? root = baseKey.OpenSubKey(branch);
+                    if (root is not null) CollectPortDescriptions(root, "", result, 0);
+                }
+            }
+            finally
+            {
+                baseKey.Dispose();
+            }
+        }
+        catch
+        {
+            // 注册表不可读时退回只显示端口名
+        }
+        return result;
+    }
+
+    private static void CollectPortDescriptions(RegistryKey key, string inherited,
+        Dictionary<string, string> result, int depth)
+    {
+        if (depth > 6) return;
+        string? own = CleanDescription(key.GetValue("FriendlyName") as string, null)
+                      ?? CleanDescription(key.GetValue("DeviceDesc") as string, null);
+        string description = own ?? inherited;
+        if (key.GetValue("PortName") is string port)
+        {
+            string name = NormalizePortName(port);
+            if (name.Length > 0)
+            {
+                result[name] = CleanDescription(key.GetValue("FriendlyName") as string, name)
+                               ?? CleanDescription(key.GetValue("DeviceDesc") as string, name)
+                               ?? description;
+            }
+            return;
+        }
+        foreach (string childName in key.GetSubKeyNames())
+        {
+            if (childName is "Properties" or "LogConf" or "Control") continue;
+            using RegistryKey? child = key.OpenSubKey(childName);
+            if (child is not null) CollectPortDescriptions(child, description, result, depth + 1);
+        }
+    }
+
+    private static string? CleanDescription(string? value, string? portName)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        string text = value!.Trim();
+        if (text.Length > 0 && text[0] == '@')
+        {
+            int semicolon = text.LastIndexOf(';');
+            if (semicolon >= 0) text = text.Substring(semicolon + 1).Trim();
+        }
+        int suffix = text.LastIndexOf("(COM", StringComparison.OrdinalIgnoreCase);
+        if (suffix > 0 && text.EndsWith(")", StringComparison.Ordinal)) text = text.Substring(0, suffix).Trim();
+        if (text.Length == 0) return null;
+        if (portName is not null &&
+            string.Equals(text, NormalizePortName(portName), StringComparison.OrdinalIgnoreCase))
+            return null;
+        return text;
+    }
 
     /// <summary>收到一段数据的回调（对应原程序 RxChar 事件的数据段）。</summary>
     public event Action<byte[]>? DataReceived;
@@ -241,7 +333,7 @@ public sealed class ComPortService : IDisposable
             if (n <= 0) return;
             var buf = new byte[n];
             int read = sp.Read(buf, 0, n);
-            if (read > 0)
+            if (read > 0 && ReferenceEquals(_port, sp))
             {
                 if (read != buf.Length) Array.Resize(ref buf, read);
                 DataReceived?.Invoke(buf);
@@ -249,6 +341,8 @@ public sealed class ComPortService : IDisposable
         }
         catch (Exception ex)
         {
+            // 换口时 Close 会先清 _port；旧端口的读异常不要再弹框打断后续切换。
+            if (!ReferenceEquals(_port, sp)) return;
             ErrorRaised?.Invoke(ex.Message, ex.Message);
         }
     }

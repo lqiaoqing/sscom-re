@@ -8,6 +8,7 @@ internal static class PortSettingsDialog
 {
     public static void Show(IWin32Window owner, ComPortService port)
     {
+        int S(int value) => Theme.Scale(owner as Control, value);
         using var form = new Form
         {
             Text = "更多串口设置",
@@ -16,26 +17,28 @@ internal static class PortSettingsDialog
             MinimizeBox = false,
             MaximizeBox = false,
             ShowInTaskbar = false,
-            ClientSize = new Size(360, 292),
+            ClientSize = new Size(S(360), S(320)),
+            AutoScaleMode = AutoScaleMode.None,
             Font = new Font("Microsoft YaHei UI", 9F),
             BackColor = Theme.Canvas,
             ForeColor = Theme.Text,
         };
 
-        int y = 12;
+        int y = S(12);
+        int rowHeight = S(32);
         ComboBox AddCombo(string label, string[] items, int selected)
         {
-            form.Controls.Add(new Label { Text = label, AutoSize = true, Location = new Point(12, y + 4), ForeColor = Theme.Muted, BackColor = Color.Transparent });
+            form.Controls.Add(new Label { Text = label, AutoSize = true, Location = new Point(S(12), y + S(4)), ForeColor = Theme.Muted, BackColor = Color.Transparent });
             var box = new ThemeComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Location = new Point(120, y),
-                Width = 220,
+                Location = new Point(S(120), y),
+                Width = S(220),
             };
             box.Items.AddRange(items);
             box.SelectedIndex = Fx.Clamp(selected, 0, items.Length - 1);
             form.Controls.Add(box);
-            y += 28;
+            y += rowHeight;
             return box;
         }
 
@@ -47,10 +50,10 @@ internal static class PortSettingsDialog
 
         TextBox AddNumber(string label, int value)
         {
-            form.Controls.Add(new Label { Text = label, AutoSize = true, Location = new Point(12, y + 4), ForeColor = Theme.Muted, BackColor = Color.Transparent });
-            var box = new ThemeTextBox { Text = value.ToString(), Location = new Point(120, y), Width = 220 };
+            form.Controls.Add(new Label { Text = label, AutoSize = true, Location = new Point(S(12), y + S(4)), ForeColor = Theme.Muted, BackColor = Color.Transparent });
+            var box = new ThemeTextBox { Text = value.ToString(), Location = new Point(S(120), y), Width = S(220) };
             form.Controls.Add(box);
-            y += 28;
+            y += rowHeight;
             return box;
         }
 
@@ -62,7 +65,7 @@ internal static class PortSettingsDialog
         {
             Text = "这些设置在下次打开串口时生效。",
             AutoSize = true,
-            Location = new Point(12, y + 4),
+            Location = new Point(S(12), y + S(4)),
             ForeColor = Theme.Muted,
             BackColor = Color.Transparent,
         });
@@ -71,11 +74,11 @@ internal static class PortSettingsDialog
         {
             Text = "确定",
             DialogResult = DialogResult.OK,
-            Location = new Point(180, 256),
-            Width = 75,
+            Location = new Point(S(180), S(280)),
+            Width = S(75),
             Kind = ThemeButton.ButtonKind.Primary,
         };
-        var cancel = new ThemeButton { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(264, 256), Width = 75 };
+        var cancel = new ThemeButton { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(S(264), S(280)), Width = S(75) };
         form.Controls.Add(ok);
         form.Controls.Add(cancel);
         form.AcceptButton = ok;
