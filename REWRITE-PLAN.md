@@ -32,7 +32,7 @@
 ## 验证
 
 - `dotnet build -c Release`：0 警告 0 错误
-- `SscomRe.exe --selftest`：`pass=182 fail=0`（组包/校验/接收/多条/ini/终端/几何/布局）
+- `SscomRe.exe --selftest`：`pass=186 fail=0`（组包/校验/接收/多条/ini/终端/几何/布局）
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 界面布局测试按 `DeviceDpi` 缩放窗口；自检开始前备份、结束后恢复 `sscom51.ini`
 
@@ -41,4 +41,4 @@
 - 烧写器（STM/GD32、STC/IAP15）：spec 命令字节未知且用户已排除。
 - 数据波形、English 切换、转换计算器、LUA、帮助页、广告/更新检查。
 - 规格未写数值的项不猜；已知取舍见 `HANDOFF.md` §7（N1058、N1080 的 1/2、Custom 流控、CPort 设置对话框）。
-- 高 DPI 只做了按物理像素的响应式布局，200% 缩放下底栏占比偏大，未做完整 DPI 自适应。
+- 高 DPI：最小窗口按 `DeviceDpi / 96` 缩放并封顶到工作区；底栏放不下时在底栏内滚动。左列宽度和网格行高仍按内容测量。

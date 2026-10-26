@@ -71,6 +71,7 @@ public sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 100 };
     private readonly System.Windows.Forms.Timer _displayTimer = new() { Interval = 30 };
     private readonly System.Windows.Forms.Timer _prewarmTimer = new() { Interval = 20 };
+    private readonly System.Windows.Forms.Timer _autoSaveTimer = new() { Interval = 400 };
     private readonly Queue<Control> _prewarmQueue = new();
     private bool _adjustingSplit;
     private readonly System.Windows.Forms.Timer _sendStringTimer = new();   // 单条定时发送
@@ -135,7 +136,9 @@ public sealed class MainForm : Form
     private bool _multiWidthCustom;
     private bool _userMovingSplitter;
     private TableLayoutPanel _bottomGrid = null!;
+    private Panel _bottomBand = null!;
     private TableLayoutPanel _rootLayout = null!;
+    private bool _updatingBottom;
     private string _ascSendText = "abcdefg";
     private string _hexSendText = "12 FF 00 30";
 
@@ -146,7 +149,7 @@ public sealed class MainForm : Form
         Font = new Font("Microsoft YaHei UI", 9F);
         Width = 980;
         Height = 700;
-        MinimumSize = new Size(820, 560);
+        MinimumSize = new Size(Px(820), Px(560));
         StartPosition = FormStartPosition.CenterScreen;
 
         BuildUi();
@@ -184,7 +187,7 @@ public sealed class MainForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // 接收区
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // 进度条
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight())); // 工具栏，可换行
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, BottomBandHeight())); // 端口 + 选项 + 发送框
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, BottomNaturalHeight())); // 端口 + 选项 + 发送框
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // 状态栏
 
         _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 8, Maximum = 100, Visible = false, Margin = new Padding(0) };
@@ -205,10 +208,23 @@ public sealed class MainForm : Form
         ResumeLayout();
     }
 
-    private int LineHeight() => Math.Max(28, Font.Height + 14);
+    /// <summary>96 DPI 下的像素，按当前设备 DPI 放大。字体高度本身已经是设备像素，不要再乘一遍。</summary>
+    private int Px(int dip)
+    {
+        int dpi = DeviceDpi;
+        if (dpi < 96) dpi = 96;
+        return Math.Max(1, dip * dpi / 96);
+    }
 
-    /// <summary>底部控制区：左侧三行端口，右侧两行选项加三行发送框。设置行换行时整体高度会增加。</summary>
-    private int BottomBandHeight() => LineHeight() * 5 + 4;
+    private int LineHeight() => Math.Max(Px(28), Font.Height + Px(14));
+
+    private int SendRowHeight() => LineHeight() + Px(2);
+
+    /// <summary>底部控制区自然高度。设置行换行时会比五行更高。</summary>
+    private int BottomNaturalHeight() => BottomContentHeight() + Px(4);
+
+    /// <summary>留给接收区的最小高度。底栏再高，也不把这块挤掉。</summary>
+    private int ReceiveReserve() => Px(160);
 
     private void UpdateToolbarRowHeight(Control toolBar)
     {
@@ -228,11 +244,9 @@ public sealed class MainForm : Form
             _relayoutScheduled = false;
             if (_rootLayout is null || _toolBar is null || _bottomGrid is null) return;
             int toolbarHeight = Math.Max(LineHeight(), _toolBar.Height);
-            int bottomHeight = BottomContentHeight() + 4;
             RowStyle toolbarRow = _rootLayout.RowStyles[2];
             if (Math.Abs(toolbarRow.Height - toolbarHeight) > 0.5f) toolbarRow.Height = toolbarHeight;
-            RowStyle bottomRow = _rootLayout.RowStyles[3];
-            if (Math.Abs(bottomRow.Height - bottomHeight) > 0.5f) bottomRow.Height = bottomHeight;
+            UpdateBottomBandHeight();
             _rootLayout.PerformLayout();
             UpdateMinimumHeight();
         }));
@@ -244,18 +258,22 @@ public sealed class MainForm : Form
         _updatingMin = true;
         try
         {
-            int required = (MainMenuStrip?.Height ?? 0)
-                           + _toolBar.Height
-                           + BottomContentHeight() + 4
-                           + (_statusStrip?.Height ?? 0)
-                           + 130;
-            int nonClient = Height - ClientSize.Height;
-            int minHeight = Math.Max(520, required + nonClient);
-            if (MinimumSize.Height != minHeight)
-            {
-                MinimumSize = new Size(MinimumSize.Width, minHeight);
-                if (Height < minHeight) Height = minHeight;
-            }
+            int chrome = (MainMenuStrip?.Height ?? 0)
+                         + _toolBar.Height
+                         + (_statusStrip?.Height ?? 0)
+                         + (_progressBar is { Visible: true } ? _progressBar.Height : 0);
+            int nonClient = Math.Max(0, Height - ClientSize.Height);
+            int desired = chrome + BottomNaturalHeight() + ReceiveReserve() + nonClient;
+            int minHeight = Math.Max(Px(520), desired);
+            int minWidth = Px(820);
+            Rectangle work = Screen.FromControl(this).WorkingArea;
+            if (work.Height > 0)
+                minHeight = Math.Min(minHeight, Math.Max(Px(300), work.Height - 8));
+            if (work.Width > 0)
+                minWidth = Math.Min(minWidth, Math.Max(Px(400), work.Width - 8));
+            if (MinimumSize.Width != minWidth || MinimumSize.Height != minHeight)
+                MinimumSize = new Size(minWidth, minHeight);
+            if (Height < minHeight) Height = minHeight;
         }
         finally
         {
@@ -263,12 +281,52 @@ public sealed class MainForm : Form
         }
     }
 
+    /// <summary>
+    /// 底栏按内容测量。窗口里放得下就用自然高度；放不下就缩短这一行并在底栏内滚动，
+    /// 不再把整个窗口的最小高度抬过屏幕。行高仍来自内容，不用网格自身高度反推。
+    /// </summary>
     private void UpdateBottomBandHeight()
     {
-        if (_rootLayout is null || _bottomGrid is null) return;
-        int h = BottomContentHeight() + 4;
-        RowStyle style = _rootLayout.RowStyles[3];
-        if (Math.Abs(style.Height - h) > 0.5f) style.Height = h;
+        if (_updatingBottom || _rootLayout is null || _bottomGrid is null || _bottomBand is null) return;
+        _updatingBottom = true;
+        try
+        {
+            int natural = BottomNaturalHeight();
+            int allotted = natural;
+            if (IsHandleCreated && ClientSize.Height > 0)
+            {
+                int chrome = (MainMenuStrip?.Height ?? 0)
+                             + (_toolBar?.Height ?? 0)
+                             + (_statusStrip?.Height ?? 0)
+                             + (_progressBar is { Visible: true } ? _progressBar.Height : 0);
+                int room = ClientSize.Height - chrome - ReceiveReserve();
+                int minBand = Math.Min(natural, Px(96));
+                if (room < minBand) room = minBand;
+                allotted = Math.Min(natural, Math.Max(room, minBand));
+            }
+
+            RowStyle style = _rootLayout.RowStyles[3];
+            if (Math.Abs(style.Height - allotted) > 0.5f) style.Height = allotted;
+
+            int width = _bottomBand.ClientSize.Width;
+            if (width > 0)
+            {
+                // 停靠的子控件不参与 AutoScroll，所以网格改为按内容摆放。
+                if (_bottomGrid.Dock != DockStyle.None) _bottomGrid.Dock = DockStyle.None;
+                if (_bottomGrid.Left != 0 || _bottomGrid.Top != 0
+                    || _bottomGrid.Width != width || _bottomGrid.Height != natural)
+                    _bottomGrid.SetBounds(0, 0, width, natural);
+            }
+
+            bool scroll = natural > allotted + 1;
+            Size minScroll = scroll ? new Size(0, natural) : Size.Empty;
+            if (_bottomBand.AutoScroll != scroll) _bottomBand.AutoScroll = scroll;
+            if (_bottomBand.AutoScrollMinSize != minScroll) _bottomBand.AutoScrollMinSize = minScroll;
+        }
+        finally
+        {
+            _updatingBottom = false;
+        }
     }
 
     private MenuStrip BuildMenu()
@@ -390,6 +448,7 @@ public sealed class MainForm : Form
     private Control BuildBottomBand()
     {
         var band = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0), Padding = new Padding(2, 0, 2, 0) };
+        _bottomBand = band;
         var grid = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -402,8 +461,8 @@ public sealed class MainForm : Form
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight()));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight()));
-        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight() + 2));
-        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, LineHeight() + 2));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, SendRowHeight()));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, SendRowHeight()));
 
         _serialRows = BuildSerialRows();
         _netRows = BuildNetRows();
@@ -449,6 +508,8 @@ public sealed class MainForm : Form
         if (_bottomGrid is null || _settingsRow1 is null || _settingsRow2 is null) return;
         SetGridRowHeight(0, Math.Max(LineHeight(), _settingsRow1.Height));
         SetGridRowHeight(1, Math.Max(LineHeight(), _settingsRow2.Height));
+        SetGridRowHeight(2, SendRowHeight());
+        SetGridRowHeight(3, SendRowHeight());
         UpdateBottomBandHeight();
     }
 
@@ -461,7 +522,7 @@ public sealed class MainForm : Form
     private int BottomContentHeight() =>
         (_settingsRow1 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow1.Height))
         + (_settingsRow2 is null ? LineHeight() : Math.Max(LineHeight(), _settingsRow2.Height))
-        + (LineHeight() + 2) * 2;
+        + SendRowHeight() * 2;
 
     private static int FlowContentWidth(FlowLayoutPanel row, bool onlyVisible = true)
     {
@@ -707,7 +768,8 @@ public sealed class MainForm : Form
                 if (ClientSize.Width > 0)
                 {
                     int desired = GetPreferredSize(new Size(ClientSize.Width, 0)).Height;
-                    int min = Math.Max(28, Font.Height + 14);
+                    int dpi = Math.Max(96, DeviceDpi);
+                    int min = Math.Max(28 * dpi / 96, Font.Height + 14 * dpi / 96);
                     if (desired < min) desired = min;
                     if (Height != desired) Height = desired;
                 }
@@ -866,6 +928,7 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             BackColor = SystemColors.Window,
         };
+        _recvBox.HandleCreated += (_, _) => DisableRecvUndo();
 
         _split = new SplitContainer
         {
@@ -983,7 +1046,7 @@ public sealed class MainForm : Form
             data.KeyPress += (_, e) =>
             {
                 if (e.KeyChar == (char)1) { data.SelectAll(); e.Handled = true; }   // Ctrl+A 全选
-                else AutoSave();                                                     // 其余键自动保存
+                else ScheduleAutoSave();                                            // 其余键防抖保存，避免每键重写整份 ini
             };
             data.DoubleClick += (_, _) => EditRowComment(row);
             _rowData[row] = data;
@@ -1009,7 +1072,7 @@ public sealed class MainForm : Form
                     order.Text = t;                       // 仅变化时写回（避免光标被重置导致多位数输入颠倒）
                     order.SelectionStart = c;
                 }
-                AutoSave();
+                ScheduleAutoSave();
             };
             _rowOrder[row] = order;
             grid.Controls.Add(order);
@@ -1023,7 +1086,7 @@ public sealed class MainForm : Form
                     time.Text = t;                        // 仅变化时写回（同样为保住光标）
                     time.SelectionStart = c;
                 }
-                AutoSave();
+                ScheduleAutoSave();
             };
             _rowTime[row] = time;
             grid.Controls.Add(time);
@@ -1230,6 +1293,11 @@ public sealed class MainForm : Form
         _statusTimer.Start();
         _displayTimer.Tick += (_, _) => DrainDisplay();
         _prewarmTimer.Tick += (_, _) => PrewarmTick();
+        _autoSaveTimer.Tick += (_, _) =>
+        {
+            _autoSaveTimer.Stop();
+            AutoSave();
+        };
         FormClosing += OnMainFormClosing;
         FormClosed += (_, _) => _port.Dispose();
     }
@@ -1382,7 +1450,18 @@ public sealed class MainForm : Form
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
     private const int EM_SETCUEBANNER = 0x1501;
+    private const int EM_SETUNDOLIMIT = 0x400 + 82;   // WM_USER + 82，RichEdit 撤销队列上限
+
+    /// <summary>接收框只追加，不需要撤销。关掉撤销缓冲，避免持续接收时内存和排版一直涨。</summary>
+    private void DisableRecvUndo()
+    {
+        if (_recvBox.IsHandleCreated)
+            SendMessage(_recvBox.Handle, EM_SETUNDOLIMIT, IntPtr.Zero, IntPtr.Zero);
+    }
 
     private static void SetCueBanner(TextBox box, string text)
     {
@@ -1851,7 +1930,16 @@ public sealed class MainForm : Form
     private void AutoSave()
     {
         if (_loading) return;
+        _autoSaveTimer.Stop();
         SaveConfig();
+    }
+
+    /// <summary>连续按键合并成一次保存。关窗时 OnMainFormClosing 会再强制写当前控件内容。</summary>
+    private void ScheduleAutoSave()
+    {
+        if (_loading) return;
+        _autoSaveTimer.Stop();
+        _autoSaveTimer.Start();
     }
 
     private void AdjustMultiButtonWidth(int delta)
@@ -2118,6 +2206,14 @@ public sealed class MainForm : Form
         if (!_openImmediatelyItem.Checked) return;
         if (_netMode == NetMode.Serial) ToggleOpen();
         else ConnectNetwork();
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        UpdateLeftColumnWidth();
+        UpdateBottomGridRows();
+        ScheduleResponsiveRelayout();
     }
 
     /// <summary>
@@ -2539,6 +2635,7 @@ public sealed class MainForm : Form
         _timerSendBox.Checked = false;
         _sendStringTimer.Stop();
         _multiTimer.Stop();
+        _autoSaveTimer.Stop();
         SaveConfig();
         try { _net.Disconnect(); } catch { /* 关闭时断开失败不影响退出 */ }
         try { _port.Close(); } catch { /* 同上 */ }

@@ -1,7 +1,7 @@
 # 交接文档：SscomRe（SSCOM 5.13.1 的 C# 重写）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前状态（2026-10-23）：**M1–M9 全部实现，`--selftest` 182/182 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前状态（2026-10-23）：**M1–M9 全部实现，`--selftest` 186/186 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -43,7 +43,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   PortSettingsDialog.cs 自建「更多串口设置」对话框
   WindowPlacement.cs    N1082–N1085 窗口几何夹取
   InputNormalizer.cs    行内数字框归一化（光标规则）
-  SelfTest.cs           --selftest 用例（当前 182 项）
+  SelfTest.cs           --selftest 用例（当前 186 项）
 ```
 
 ---
@@ -65,7 +65,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `SscomRe.exe --selftest` → `pass=182 fail=0`
+- `SscomRe.exe --selftest` → `pass=186 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境无真实 COM 口，串口/网络的实机收发热路径仍需在目标硬件上复验
 
@@ -79,7 +79,7 @@ dotnet build -c Release
 # 输出固定为 SscomRe/bin/net48/SscomRe.exe（csproj 固定 OutputPath）
 
 cd bin/net48
-./SscomRe.exe --selftest          # 必须 pass=182 fail=0
+./SscomRe.exe --selftest          # 必须 pass=186 fail=0
 
 # 冒烟：跑 ≥5 秒，检查没崩
 rm -f crash.log
@@ -138,11 +138,11 @@ taskkill //IM SscomRe.exe //F
 - 设置里的“HEX发送/定时发送/加回车换行”用 `MakeGroup` 成组，窄窗时整组折行；不要给需要折行的 `FlowLayoutPanel` 设 `AutoSize=true`。
 - `WrapRowPanel`：宽度固定为父宽、按 `GetPreferredSize(width)` 自动增高、按视觉行垂直居中；`MarkRightGroup`/`AlignRightGroup` 用于右侧组；`StretchControl` 用于路径框填充。
 - 左栏宽度由当前模式三行的实际内容测量（`UpdateLeftColumnWidth`）；`UpdateBottomGridRows` 把两行选项的实际高度写入网格行高；`BottomContentHeight` 计算底栏总高。不要用网格自身高度反推根行高（会形成布局循环）。
-- 窗口最小尺寸基准 820×560；`UpdateMinimumHeight()` 按当前折行高度保证底栏和状态栏不被挤出窗口；`ScheduleResponsiveRelayout()` 在缩放后延迟终排。
+- 窗口最小尺寸基准 820×560，按 `DeviceDpi / 96` 缩放，并且不超过当前屏幕工作区。底栏按内容测量；放得下就用自然高度，放不下就在底栏内部滚动，不再把最小高度抬过屏幕。`ScheduleResponsiveRelayout()` 在缩放后延迟终排。
 - 多条字符串 297 行不用 TableLayoutPanel：`MultiRowsPanel` 自绘布局（固定行高/列宽，一次定位），分 3 页。行按钮调宽只改 `SendColumnWidth` 后 `PerformLayout()`。
 - 首次展开前 `_prewarmTimer` 在 OnShown 后分批创建多面板句柄（每 20ms 8 个）；改回 TableLayoutPanel 会回到秒级展开。
 - 接收框 `WordWrap = true`、`ScrollBars.Vertical`；追加走 `_displayTimer`（30ms 合并）；在底部时跟随，向上翻看历史时保持滚动/光标。
-- 高 DPI：物理像素布局 + 放大字体在 200% 缩放下会把底栏撑得很大，接收区变窄；自检已按 `DeviceDpi` 缩放测试窗口，但界面本身没有做完整的 DPI 自适应布局。改动布局时在 100% 和 200% 下都要看。
+- 高 DPI：行高里的固定像素（行距、最小窗口）按 `DeviceDpi / 96` 缩放，字体高度不要再乘一遍。底栏超出窗口时自己滚动，接收区至少留 `Px(160)`。左列仍按内容测量，不要用网格高度反推行高。改动布局时在 100% 和 200% 下都要看。
 
 ---
 
@@ -196,7 +196,7 @@ taskkill //IM SscomRe.exe //F
 按用户优先级从高到低：
 
 1. 在真实串口/网口上复验：打开/关闭、DTR/RTS、发送文件、定时发送、TCP 服务端多连接、UDP。
-2. 高 DPI 布局自适应（200% 缩放下底栏过高）；目前只保证 100%–150% 可用。
+2. 高 DPI：最小窗口按 DPI 缩放并封顶到工作区，底栏放不下时在底栏内滚动。改布局时仍要在 100% 和 200% 下看接收区是否被挤扁。
 3. 规格「还不能当规则用的部分」里的烧写器、波形等——**用户已排除，不要做**。
 4. 若需要单文件分发，可在 csproj 增加 Costura/ILMerge 方案；当前分发 exe + config 即可，目标机只需 .NET Framework 4.8。
 

@@ -114,16 +114,17 @@ public sealed class ReceiveDisplay
 
         if (Limit < _counter)
         {
-            // 截断（0x4eb14c 的 Copy 语义：1 基起点，起点钳到 1）
+            // 截断（0x4eb14c 的 Copy 语义：1 基起点，起点钳到 1）。
+            // 只从 StringBuilder 拷出要留下的一段，不要先 ToString 整段再 Substring。
             var newRaw = DelphiCopyBytes(_raw, _counter - 100_000 + 1, 100_000);
-            var newHex = DelphiCopy(_hex.ToString(), _counter - 300_000 + 1, 300_000);
+            string newHex = DelphiCopy(_hex, _counter - 300_000 + 1, 300_000);
             _raw.Clear();
             _raw.AddRange(newRaw);
             _hex.Clear().Append(newHex);
             // 文本累积原来不截断，长时间接收会一直涨。按留下的原始字节重算，和切换到文本显示时看到的内容一致。
             _text.Clear().Append(SendComposer.EscapeForDisplay(newRaw));
             _counter = 100_000;
-            memoReplace = hexDisplay ? _hex.ToString() : SendComposer.DecodeGbk(_raw.ToArray());
+            memoReplace = hexDisplay ? newHex : SendComposer.DecodeGbk(_raw.ToArray());
         }
         return display;
     }
@@ -167,13 +168,13 @@ public sealed class ReceiveDisplay
 
     // ———— Delphi Copy 等价实现（1 基起点，起点小于 1 钳到 1，起点越界给空） ————
 
-    private static string DelphiCopy(string s, long start1, long count)
+    private static string DelphiCopy(StringBuilder s, long start1, long count)
     {
         if (start1 < 1) start1 = 1;
         if (start1 > s.Length) return "";
         long len = Math.Min(count, s.Length - start1 + 1);
         if (len <= 0) return "";
-        return s.Substring((int)(start1 - 1), (int)len);
+        return s.ToString((int)(start1 - 1), (int)len);
     }
 
     private static byte[] DelphiCopyBytes(List<byte> src, long start1, long count)

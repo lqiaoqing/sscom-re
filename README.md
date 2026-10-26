@@ -3,7 +3,7 @@
 按逆向整理出的行为规格，用 **C# WinForms / .NET Framework 4.8** 重写 `sscom5.13.1.exe`（Delphi/VCL 串口网络调试工具）的日常收发功能。
 
 - 行为唯一依据：[sscom5.13.1-rewrite-spec.md](sscom5.13.1-rewrite-spec.md)
-- 当前状态：M1–M9 全部实现；`--selftest` 182/182 通过
+- 当前状态：M1–M9 全部实现；`--selftest` 186/186 通过
 - 目标系统：Windows 10/11（自带 .NET Framework 4.8）
 - 原版程序、解包镜像和反编译源码**不在本仓库中**，详见 [_analysis/README.md](_analysis/README.md)
 
@@ -90,7 +90,7 @@ cd SscomRe/bin/net48
 ./SscomRe.exe --selftest
 ```
 
-- 当前结果：`SELFTEST pass=182 fail=0`
+- 当前结果：`SELFTEST pass=186 fail=0`
 - 覆盖组包/转义、7 种校验、接收显示与截断、多条发送状态机、ini 往返、终端按键、窗口几何、主窗体布局等
 - 自检会临时创建主窗体并触发自动保存；开始前会备份现有 `sscom51.ini`，结束后原样恢复（没有则删除）
 - 布局检查按 `DeviceDpi` 缩放测试窗口，100%–200% 缩放下都可复现
@@ -141,7 +141,7 @@ SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
 - 「更多串口设置」为自建对话框，不是原版 CPort 组件对话框；流控 `Custom` 在打开时按 `None` 处理
 - `N1058`（多条发送间隔）固定写 `1000`，读入时忽略（原程序用隐藏中转框，重写无此控件）
 - `N1080` 的 `1` 和 `2` 都映射为 TCPClient（照规格原文的怪癖）
-- 界面按物理像素布局、字体按 DPI 渲染；高 DPI（如 200%）下底栏占比明显变大，建议最大化窗口或降低显示缩放
+- 界面按物理像素布局、字体按 DPI 渲染。最小窗口随 DPI 放大，但不超过屏幕工作区；底栏放不下时在底栏内部滚动，避免把接收区挤扁
 - 自检不依赖真实串口/网络硬件；实机串口收发仍需在目标机器上复验
 
 ## 故障排查
