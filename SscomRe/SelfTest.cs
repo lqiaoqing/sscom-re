@@ -100,6 +100,20 @@ internal static class SelfTest
         for (int i = 0; i < 6; i++) big.Process(zeros, false, false, 20, out _);
         CheckText("截断后文本累积有界", big.TextAccum.Length <= 220000 ? "yes" : "no", "yes");
 
+        // 起点落在缓冲中间时，只按 Delphi Copy 留下 30 万字符，不依赖先物化整段。
+        {
+            var wide = new ReceiveDisplay { Limit = 300_000 };
+            var chunk = new byte[300_010];
+            for (int i = 0; i < chunk.Length; i++) chunk[i] = (byte)(i * 17);
+            wide.Process(chunk, true, false, 20, out var replaced);
+            string expect = SendComposer.HexText(chunk).Substring(10, 300_000); // 1 基起点 11
+            string got = wide.HexText;
+            CheckText("大块截断计数仍归 100000", wide.Counter.ToString(), "100000");
+            CheckText("大块截断十六进制长度", got.Length.ToString(), "300000");
+            CheckText("大块截断十六进制起点", got == expect ? "yes" : "no", "yes");
+            CheckText("大块截断重画等于十六进制", replaced == got ? "yes" : "no", "yes");
+        }
+
         // —— 多条发送状态机（排序后的表：顺序号快照 + 数据 + 行号） ——
         {
             // 全 0 顺序：一拍扫完 99 次跳过 → 自动停
@@ -634,7 +648,7 @@ internal static class SelfTest
                 CheckText("同样字体再设一次字号仍在", recv.Font.Size.ToString(System.Globalization.CultureInfo.InvariantCulture), "16");
             }
 
-            form.Width = 820;
+            form.Width = Math.Max(820, form.MinimumSize.Width);
             Application.DoEvents();
             foreach (var c in AllControls(form))
                 if (c is Button expand && expand.Text == "扩展")

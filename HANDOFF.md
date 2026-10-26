@@ -1,7 +1,7 @@
 # 交接文档：SscomRe（SSCOM 5.13.1 的 C# 重写）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前状态（2026-10-25）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏折叠、Phase 3B 设置浮层、Phase 3C RTF 日志性能/短动效/toast 已接入，`--selftest` 198/198 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前状态（2026-10-25）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏折叠、Phase 3B 设置浮层、Phase 3C RTF 日志性能/短动效/toast 已接入，`--selftest` 202/202 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -53,7 +53,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   PortSettingsDialog.cs 自建「更多串口设置」对话框
   WindowPlacement.cs    N1082–N1085 窗口几何夹取
   InputNormalizer.cs    行内数字框归一化（光标规则）
-  SelfTest.cs           --selftest 用例（当前 198 项）
+  SelfTest.cs           --selftest 用例（当前 202 项）
 ```
 
 ---
@@ -80,7 +80,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `SscomRe.exe --selftest` → `pass=198 fail=0`
+- `SscomRe.exe --selftest` → `pass=202 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境无真实 COM 口，串口/网络的实机收发热路径仍需在目标硬件上复验
 
@@ -94,7 +94,7 @@ dotnet build -c Release
 # 输出固定为 SscomRe/bin/net48/SscomRe.exe（csproj 固定 OutputPath）
 
 cd bin/net48
-./SscomRe.exe --selftest          # 必须 pass=198 fail=0
+./SscomRe.exe --selftest          # 必须 pass=202 fail=0
 ./SscomRe.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
 
 # 冒烟：跑 ≥5 秒，检查没崩
@@ -121,6 +121,7 @@ taskkill //IM SscomRe.exe //F
 - 串口/网络接收事件在**后台线程**。接收线程**绝不能读控件属性**（跨线程读 `TextBox.Text` 会发 `WM_GETTEXT` 并等界面线程，把接收线程堵死——这是修过的真实 bug）。
 - 接收参数走**快照字段**：`_snapHexDisplay/_snapTimestamp/_snapRecvToFile/_snapTimeoutMs`，只在界面线程由 `RefreshRecvSnapshot()` 刷新（订阅四个控件的 Changed 事件）。**新增影响接收的控件时必须加进 `RefreshRecvSnapshot`。**
 - 界面更新走**合并队列**：接收线程 `EnqueueDisplay(segment, memoReplace)`，界面线程 `DrainDisplay()` 每 30ms 合并一次；截断重画优先。不要改回“每段一个 BeginInvoke”。
+- 截断十六进制累积时只从 `StringBuilder` 拷出要留下的 30 万字符，不要先 `ToString` 整段。接收日志框创建后把撤销上限设为 0。
 
 ### 5.2 发送入口
 
@@ -135,6 +136,7 @@ taskkill //IM SscomRe.exe //F
 - `N<k>`/`N<100+k>` 第 1 页；第 2 页 `N201–N299`/`N301–N399`；第 3 页 `N401–N499`/`N501–N599`。旧 ini 只有第 1 页时，后两页保持默认。
 - 数据字段转义：`,`→`0x02`、CR→`0x03`、LF→`0x04`；设置行格式 `N<键>=,<值>`。
 - 关窗：停定时器 → `SaveConfig()` → 断网络/关串口。保存几何时最大化用 `RestoreBounds`，不保存屏幕外边界。
+- 多条数据/顺序/延时框按键走约 400ms 防抖再写 ini；勾选、注释和「保存参数」仍马上写。关窗会停掉防抖定时器再按当前控件内容写一次。
 - 导入 ini：选文件 → 覆盖写到当前目录 `sscom51.ini` → `LoadConfig()` 全量重载；读写失败文案沿用规格。
 - 已打开串口的线路参数（数据位/停止位/校验/流控/缓冲/超时）不会即时重配，**下次打开生效**（WinForms SerialPort 限制，对话框里有提示）。
 
@@ -160,7 +162,7 @@ taskkill //IM SscomRe.exe //F
 - 日志性能：`AppendFormatted` 一次构造 RTF 后 `SelectedRtf` 单次插入，批量追加时 `WM_SETREDRAW` 关闭重绘；`DrainDisplay` 不再每 30ms 刷整条状态栏。`--bench-log [MiB] [chunkKiB] [--hex] [--shot path]` 用真实窗体路径压测。2 MiB 文本 avg 15.8ms/30KiB、max 76.7ms（截断重画）；1 MiB HEX avg 52ms、max 465ms，HEX 高吞吐仍可能掉帧，但原始缓冲/计数不受影响。
 - 日志头：`LogBarHeight = max(44, Theme.Scale(this,44))`；标题/副标题固定高度 + `RowFlowPanel` 垂直居中；搜索/暂停/清除/保存放在右侧 `RowFlowPanel`，搜索框宽度随 DPI 缩放。日志头的 TableLayoutPanel 必须有显式 Percent 行，否则默认 100px 会压住日志。
 - `WrapRowPanel`：宽度固定为父宽、按 `GetPreferredSize(width)` 自动增高、按视觉行垂直居中；`MarkRightGroup`/`AlignRightGroup` 用于右侧组；`StretchControl` 用于路径框填充。设置入口在右侧组；`RowFlowPanel` 的 `OnLayout` 按“视觉行”分别垂直居中，浮层内换行时不能把所有子控件拉回同一行。
-- 窗口最小尺寸基准 820×560；`UpdateMinimumHeight()` 用 `ComposerHeight` 保证日志/发送区/状态栏不被挤出；`ScheduleResponsiveRelayout()` 在缩放后延迟终排并更新侧栏宽度/composer 行高/日志头响应式。
+- 窗口最小尺寸基准 820×560，按 `Theme.Scale` 随 DPI 放大，并且不超过当前屏幕工作区。`UpdateMinimumHeight()` 用 `ComposerHeight` 保证日志/发送区/状态栏不被挤出；`ScheduleResponsiveRelayout()` 在缩放后延迟终排并更新侧栏宽度/composer 行高/日志头响应式。
 - 多条字符串 297 行不用 TableLayoutPanel：`MultiRowsPanel` 自绘布局（固定行高/列宽，一次定位），分 3 页；首次展开前 `_prewarmTimer` 在 OnShown 后分批创建句柄（每 20ms 8 个）。
 - 高 DPI：200% 窄屏三栏会拥挤；`UpdateLogHeaderResponsive` 在中心宽度 <620 隐藏搜索框、<420 隐藏副标题。改动布局时在 100% 和 200% 下都要看；当前已在 192 DPI 自检、125%/200% 窗口截图核对，100%/150% 尚未单独回归。
 

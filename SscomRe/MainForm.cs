@@ -92,6 +92,7 @@ public sealed partial class MainForm : Form
     private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 100 };
     private readonly System.Windows.Forms.Timer _displayTimer = new() { Interval = 30 };
     private readonly System.Windows.Forms.Timer _prewarmTimer = new() { Interval = 20 };
+    private readonly System.Windows.Forms.Timer _autoSaveTimer = new() { Interval = 400 };
     private readonly Queue<Control> _prewarmQueue = new();
     private bool _adjustingSplit;
     private readonly System.Windows.Forms.Timer _sendStringTimer = new();   // 单条定时发送
@@ -189,7 +190,7 @@ public sealed partial class MainForm : Form
         Font = new Font("Microsoft YaHei UI", 9F);
         Width = 980;
         Height = 700;
-        MinimumSize = new Size(820, 560);
+        MinimumSize = new Size(Theme.Scale(this, 820), Theme.Scale(this, 560));
         StartPosition = FormStartPosition.CenterScreen;
 
         // 建控件前先定主题，避免启动时先画深色再整体换色。
@@ -328,14 +329,18 @@ public sealed partial class MainForm : Form
                            + _toolBar.Height
                            + ComposerHeight()
                            + (_statusStrip?.Height ?? 0)
-                           + 220;                       // 日志区最小高度
-            int nonClient = Height - ClientSize.Height;
-            int minHeight = Math.Max(560, required + nonClient);
-            if (MinimumSize.Height != minHeight)
-            {
-                MinimumSize = new Size(MinimumSize.Width, minHeight);
-                if (Height < minHeight) Height = minHeight;
-            }
+                           + Theme.Scale(this, 220);     // 日志区最小高度
+            int nonClient = Math.Max(0, Height - ClientSize.Height);
+            int minHeight = Math.Max(Theme.Scale(this, 560), required + nonClient);
+            int minWidth = Theme.Scale(this, 820);
+            Rectangle work = Screen.FromControl(this).WorkingArea;
+            if (work.Height > 0)
+                minHeight = Math.Min(minHeight, Math.Max(Theme.Scale(this, 300), work.Height - 8));
+            if (work.Width > 0)
+                minWidth = Math.Min(minWidth, Math.Max(Theme.Scale(this, 400), work.Width - 8));
+            if (MinimumSize.Width != minWidth || MinimumSize.Height != minHeight)
+                MinimumSize = new Size(minWidth, minHeight);
+            if (Height < minHeight) Height = minHeight;
         }
         finally
         {
@@ -922,7 +927,7 @@ public sealed partial class MainForm : Form
             data.KeyPress += (_, e) =>
             {
                 if (e.KeyChar == (char)1) { data.SelectAll(); e.Handled = true; }   // Ctrl+A 全选
-                else AutoSave();                                                     // 其余键自动保存
+                else ScheduleAutoSave();                                            // 其余键防抖保存，避免每键重写整份 ini
             };
             data.DoubleClick += (_, _) => EditRowComment(row);
             _rowData[row] = data;
@@ -948,7 +953,7 @@ public sealed partial class MainForm : Form
                     order.Text = t;                       // 仅变化时写回（避免光标被重置导致多位数输入颠倒）
                     order.SelectionStart = c;
                 }
-                AutoSave();
+                ScheduleAutoSave();
             };
             _rowOrder[row] = order;
             grid.Controls.Add(order);
@@ -962,7 +967,7 @@ public sealed partial class MainForm : Form
                     time.Text = t;                        // 仅变化时写回（同样为保住光标）
                     time.SelectionStart = c;
                 }
-                AutoSave();
+                ScheduleAutoSave();
             };
             _rowTime[row] = time;
             grid.Controls.Add(time);
@@ -1229,6 +1234,11 @@ public sealed partial class MainForm : Form
         _statusTimer.Start();
         _displayTimer.Tick += (_, _) => DrainDisplay();
         _prewarmTimer.Tick += (_, _) => PrewarmTick();
+        _autoSaveTimer.Tick += (_, _) =>
+        {
+            _autoSaveTimer.Stop();
+            AutoSave();
+        };
         WireMotion();
         FormClosing += OnMainFormClosing;
         FormClosed += (_, _) => _port.Dispose();
@@ -1872,7 +1882,16 @@ public sealed partial class MainForm : Form
     private void AutoSave()
     {
         if (_loading) return;
+        _autoSaveTimer.Stop();
         SaveConfig();
+    }
+
+    /// <summary>连续按键合并成一次保存。关窗时 OnMainFormClosing 会再强制写当前控件内容。</summary>
+    private void ScheduleAutoSave()
+    {
+        if (_loading) return;
+        _autoSaveTimer.Stop();
+        _autoSaveTimer.Start();
     }
 
     private void AdjustMultiButtonWidth(int delta)
@@ -2665,6 +2684,7 @@ public sealed partial class MainForm : Form
         _timerSendBox.Checked = false;
         _sendStringTimer.Stop();
         _multiTimer.Stop();
+        _autoSaveTimer.Stop();
         SaveConfig();
         try { _net.Disconnect(); } catch { /* 关闭时断开失败不影响退出 */ }
         try { _port.Close(); } catch { /* 同上 */ }
