@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Threading;
 
 namespace SscomRe;
 
@@ -544,6 +545,7 @@ internal static class SelfTest
             string ini = Path.Combine(AppContext.BaseDirectory, "sscom51.ini");
             byte[]? iniBackup = File.Exists(ini) ? File.ReadAllBytes(ini) : null;
             using var form = new MainForm();
+            form.AnimationsEnabled = false;
             form.StartPosition = FormStartPosition.Manual;
             form.Location = new Point(-24000, -24000);
             form.Show();
@@ -564,18 +566,32 @@ internal static class SelfTest
             }
             CheckText("找到发送框", send is null ? "no" : "yes", "yes");
             CheckText("找到接收框", recv is null ? "no" : "yes", "yes");
+            CheckText("搜索无结果提示", form.SearchForTest("definitely-not-in-log") ? "yes" : "no", "yes");
+            form.HideToastForTest();
             if (send is not null && recv is not null)
             {
                 CheckText("接收区高于发送区", recv.Height > send.Height * 3 ? "yes" : "no", "yes");
                 CheckText("发送框约三行", send.Height >= form.Font.Height * 2 && send.Height <= form.Font.Height * 6 ? "yes" : "no", "yes");
             }
             if (stamp is not null)
+            {
+                form.OpenReceiveSettingsForTest();
+                Application.DoEvents();
+                CheckText("接收设置浮层可打开", stamp.Visible ? "yes" : "no", "yes");
                 CheckText("时间戳文字不被拆开", stamp.Width >= stamp.PreferredSize.Width - 2 ? "yes" : "no", "yes");
+                form.CloseSettingsForTest();
+                Application.DoEvents();
+            }
             if (verify is not null)
             {
+                form.OpenSendSettingsForTest();
+                Application.DoEvents();
+                CheckText("发送设置浮层可打开", verify.Visible ? "yes" : "no", "yes");
                 int right = verify.PointToScreen(new Point(verify.Width, 0)).X;
                 int limit = form.PointToScreen(new Point(form.ClientSize.Width, 0)).X + 4;
                 CheckText("校验框在窗口内", right <= limit ? "yes" : "no", "yes");
+                form.CloseSettingsForTest();
+                Application.DoEvents();
             }
             int sendAt720 = send?.Height ?? 0;
             form.Size = new Size(1200 * scale / 96, 980 * scale / 96);
@@ -687,6 +703,23 @@ internal static class SelfTest
                 CheckText("多条三页", pages.ToString(), "3");
                 CheckText("三页共297条", dataBoxes.ToString(), "297");
             }
+
+            form.AnimationsEnabled = true;
+            form.ToggleComposerForTest();
+            for (int i = 0; i < 40 && form.AnimationRunningForTest; i++)
+            {
+                Application.DoEvents();
+                Thread.Sleep(15);
+            }
+            CheckText("composer 收起动画完成", form.ComposerVisibleForTest ? "no" : "yes", "yes");
+            form.ToggleComposerForTest();
+            for (int i = 0; i < 40 && form.AnimationRunningForTest; i++)
+            {
+                Application.DoEvents();
+                Thread.Sleep(15);
+            }
+            CheckText("composer 展开动画完成", form.ComposerVisibleForTest ? "yes" : "no", "yes");
+            form.AnimationsEnabled = false;
             form.Close();
             // Close 会保存测试中改过的字体/模式/几何；收尾时还原用户原配置。
             if (iniBackup is not null) File.WriteAllBytes(ini, iniBackup);

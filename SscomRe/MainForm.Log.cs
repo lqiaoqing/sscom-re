@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Drawing;
+using System.Text;
 using System.Windows.Forms;
 
 namespace SscomRe;
@@ -21,36 +23,92 @@ public sealed partial class MainForm
     private void AppendFormatted(string text)
     {
         List<LogFormatter.Line> lines = LogFormatter.Parse(text, _hexDisplayBox.Checked);
+        Color defaultColor = _recvBox.ForeColor;
+        Color defaultBack = _recvBox.BackColor;
+        var colors = new List<Color>();
+        int ColorIndex(Color c)
+        {
+            int i = colors.IndexOf(c);
+            if (i >= 0) return i + 1;
+            colors.Add(c);
+            return colors.Count;
+        }
+
+        int defaultCf = ColorIndex(defaultColor);
+        int defaultHl = ColorIndex(defaultBack);
+        int txHl = ColorIndex(Theme.TxWash);
+        int errorHl = ColorIndex(Theme.ErrorWash);
+
+        // 一次构造整批 RTF，再用 SelectedRtf 单次插入；逐段 SelectionColor/AppendText 在长日志上是 O(n²)。
+        var body = new StringBuilder(Math.Max(64, text.Length * 2));
         bool first = true;
-        _recvBox.SelectionStart = _recvBox.TextLength;
-        _recvBox.SelectionLength = 0;
         foreach (LogFormatter.Line line in lines)
         {
             if (!first)
             {
-                _recvBox.SelectionColor = _recvBox.ForeColor;
-                _recvBox.SelectionBackColor = _recvBox.BackColor;
-                _recvBox.AppendText("\n");
+                body.Append(@"{\cf").Append(defaultCf)
+                    .Append(@"\highlight").Append(defaultHl).Append(@"\line}");
             }
             first = false;
 
-            Color back = line.Error ? Theme.ErrorWash : line.Tx ? Theme.TxWash : _recvBox.BackColor;
+            int back = line.Error ? errorHl : line.Tx ? txHl : defaultHl;
             foreach (LogFormatter.Span span in line.Spans)
             {
                 Color color = LogColorOf(span.Kind);
                 if (line.Tx && span.Kind == LogFormatter.Kind.Data)
                     color = Theme.StatusSend;
-                _recvBox.SelectionStart = _recvBox.TextLength;
-                _recvBox.SelectionLength = 0;
-                _recvBox.SelectionColor = color;
-                _recvBox.SelectionBackColor = back;
-                _recvBox.AppendText(span.Text);
+                body.Append(@"{\cf").Append(ColorIndex(color))
+                    .Append(@"\highlight").Append(back).Append(' ');
+                AppendRtfText(body, span.Text);
+                body.Append('}');
             }
         }
+
+        var rtf = new StringBuilder(body.Length + 256);
+        rtf.Append(@"{\rtf1\ansi\deff0{\fonttbl{\f0\fnil\fcharset")
+            .Append(Math.Max(0, (int)_recvBox.Font.GdiCharSet)).Append(' ')
+            .Append(RtfFontName(_recvBox.Font.Name)).Append(@";}}");
+        rtf.Append(@"{\colortbl ;");
+        foreach (Color c in colors)
+        {
+            rtf.Append(@"\red").Append(c.R)
+                .Append(@"\green").Append(c.G)
+                .Append(@"\blue").Append(c.B).Append(';');
+        }
+        rtf.Append(@"}\viewkind4\uc1\pard\f0\fs")
+            .Append(Math.Max(1, (int)Math.Round(_recvBox.Font.SizeInPoints * 2))).Append(' ');
+        rtf.Append(body).Append('}');
+
         _recvBox.SelectionStart = _recvBox.TextLength;
         _recvBox.SelectionLength = 0;
-        _recvBox.SelectionColor = _recvBox.ForeColor;
-        _recvBox.SelectionBackColor = _recvBox.BackColor;
+        _recvBox.SelectedRtf = rtf.ToString();
+        _recvBox.SelectionStart = _recvBox.TextLength;
+        _recvBox.SelectionLength = 0;
+        _recvBox.SelectionColor = defaultColor;
+        _recvBox.SelectionBackColor = defaultBack;
+    }
+
+    private static string RtfFontName(string name) =>
+        name.Replace(@"\", "").Replace("{", "").Replace("}", "").Replace(";", " ");
+
+    private static void AppendRtfText(StringBuilder sb, string text)
+    {
+        foreach (char ch in text)
+        {
+            switch (ch)
+            {
+                case '\\': sb.Append(@"\\"); break;
+                case '{': sb.Append(@"\{"); break;
+                case '}': sb.Append(@"\}"); break;
+                case '\t': sb.Append(@"\tab "); break;
+                case '\r': break;
+                case '\n': sb.Append(@"\line "); break;
+                default:
+                    if (ch < 32 || ch > 126) sb.Append(@"\u").Append((short)ch).Append('?');
+                    else sb.Append(ch);
+                    break;
+            }
+        }
     }
 
     private void RenderLogFromText(string text)
@@ -129,6 +187,7 @@ public sealed partial class MainForm
         if (query.Length == 0)
         {
             ClearSearchHighlight();
+            HideToast();
             return;
         }
         ClearSearchHighlight();
@@ -140,7 +199,12 @@ public sealed partial class MainForm
         if (index < 0 && _recvBox.TextLength > 0)
             index = _recvBox.Find(query, forward ? 0 : _recvBox.TextLength, options);
         if (index < 0)
+        {
+            string shown = query.Length > 24 ? query.Substring(0, 24) + "…" : query;
+            ShowToast("未找到「" + shown + "」", ToastTone.Warning);
             return;
+        }
+        HideToast();
         _recvBox.Select(index, query.Length);
         _recvBox.SelectionBackColor = Theme.SearchHighlight;
         _searchStart = index;
@@ -169,7 +233,15 @@ public sealed partial class MainForm
     private void CopyPlainLog()
     {
         string text = _recvBox.SelectionLength > 0 ? _recvBox.SelectedText : _recvBox.Text;
-        try { Clipboard.SetText(LogFormatter.StripMeta(text)); } catch { /* 剪贴板被占用时忽略 */ }
+        try
+        {
+            Clipboard.SetText(LogFormatter.StripMeta(text));
+            ShowToast("已复制纯数据");
+        }
+        catch
+        {
+            // 剪贴板被占用时忽略
+        }
     }
 
     private static string RateText(double bytes)
@@ -216,5 +288,69 @@ public sealed partial class MainForm
         menu.Items.AddRange(new ToolStripItem[] { copy, plain, new ToolStripSeparator(), all, clear });
         Theme.StyleContextMenu(menu);
         return menu;
+    }
+
+    // ———————————————————————— 压测钩子（--bench-log） ————————————————————————
+
+    internal void PrepareLogBenchmark(bool hex)
+    {
+        _displayTimer.Stop();
+        ClearReceive();
+        HideToast();
+        _autoFollow = true;
+        if (_hexDisplayBox.Checked != hex) _hexDisplayBox.Checked = hex;
+        RefreshRecvSnapshot();
+        BenchDecodeMs = 0;
+        BenchDrainMs = 0;
+        BenchPumpMs = 0;
+    }
+
+    internal double BenchDecodeMs;
+    internal double BenchDrainMs;
+    internal double BenchPumpMs;
+
+    internal double FeedLogChunkForBenchmark(byte[] chunk)
+    {
+        var watch = Stopwatch.StartNew();
+        HandleIncoming(chunk);
+        BenchDecodeMs += watch.Elapsed.TotalMilliseconds;
+
+        watch.Restart();
+        DrainDisplay();
+        double drain = watch.Elapsed.TotalMilliseconds;
+        BenchDrainMs += drain;
+
+        watch.Restart();
+        Application.DoEvents();
+        double pump = watch.Elapsed.TotalMilliseconds;
+        BenchPumpMs += pump;
+        return drain + pump;
+    }
+
+    internal int LogTextLengthForBenchmark => _recvBox.TextLength;
+
+    internal bool SearchForTest(string query)
+    {
+        if (_searchBox is null) return false;
+        _searchBox.Text = query;
+        SearchNext(true);
+        return _toast is { Visible: true };
+    }
+
+    internal void HideToastForTest() => HideToast();
+
+    internal void ShowBenchmarkDemo()
+    {
+        ClearReceive();
+        HideToast();
+        _displayTimer.Stop();
+        AppendFormatted(
+            "[12:34:56.789]收←◆Hello 世界\r\n" +
+            "[12:34:57.000]发→◇12 FF 00\r\n" +
+            "[12:34:57.100]收←◆ERR checksum 校验失败\r\n" +
+            "普通数据 ABC 0123");
+        _recvBox.SelectionStart = _recvBox.TextLength;
+        _recvBox.SelectionLength = 0;
+        _recvBox.ScrollToCaret();
     }
 }

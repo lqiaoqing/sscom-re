@@ -61,8 +61,16 @@ public sealed partial class MainForm : Form
     private ToolStripStatusLabel _recvStatus = null!;
     private ToolStripStatusLabel _modemStatus = null!;
     private WrapRowPanel _settingsRow1 = null!;
-    private WrapRowPanel _settingsRow2 = null!;
     private Control _sendArea = null!;
+    private ThemeButton _recvSettingsButton = null!;
+    private ThemeButton _sendSettingsButton = null!;
+    private Panel _recvSettingsFlyout = null!;
+    private Panel _sendSettingsFlyout = null!;
+    private Panel? _openFlyout;
+    private Control? _openFlyoutAnchor;
+    private Control? _flyoutClosedAnchor;
+    private DateTime _flyoutClosedAt;
+    private FlyoutDismissFilter? _flyoutFilter;
     private Button _hideToggleButton = null!;
     private Button _collapseButton = null!;
     private SplitContainer _split = null!;
@@ -252,11 +260,15 @@ public sealed partial class MainForm : Form
 
         toolBar.SizeChanged += (_, _) => { UpdateToolbarRowHeight(toolBar); ScheduleResponsiveRelayout(); };
         UpdateToolbarRowHeight(toolBar);
-        SizeChanged += (_, _) => ScheduleResponsiveRelayout();
+        SizeChanged += (_, _) => { HideToast(); CloseFlyout(); ScheduleResponsiveRelayout(); };
+        Move += (_, _) => { HideToast(); CloseFlyout(); };
+        menu.MenuActivate += (_, _) => CloseFlyout();
 
         Controls.Add(root);
         Controls.Add(menu);
         MainMenuStrip = menu;
+        BuildSettingsFlyouts();
+        BuildToast();
         ResumeLayout();
     }
 
@@ -499,53 +511,30 @@ public sealed partial class MainForm : Form
 
         _hexDisplayBox = Cb("HEX显示");
         Put(row, _hexDisplayBox);
-        _recvToFileBox = Cb("接收数据到文件");
-        Put(row, _recvToFileBox);
         _hexSendBox = Cb("HEX发送");
+        Put(row, _hexSendBox);
         _timerSendBox = Cb("定时发送:");
+        Put(row, _timerSendBox);
         _timerIntervalEdit = new ThemeTextBox { Text = "1000", Width = unit * 4 };
+        Put(row, _timerIntervalEdit);
+        Put(row, Lb("ms/次"));
         _newLineBox = Cb("加回车换行");
-        Put(row, MakeGroup(_hexSendBox, _timerSendBox, _timerIntervalEdit, Lb("ms/次"), _newLineBox));
+        Put(row, _newLineBox);
+
+        row.MarkRightGroup();
+        _recvSettingsButton = SettingButton("接收设置 ▾");
+        _sendSettingsButton = SettingButton("发送设置 ▾");
+        Put(row, _recvSettingsButton);
+        Put(row, _sendSettingsButton);
         return row;
     }
 
-    private WrapRowPanel BuildVerifyRow()
+    private static ThemeButton SettingButton(string text) => new()
     {
-        var row = MakeWrapLine();
-        Label Lb(string text) => new() { Text = text, AutoSize = true, ForeColor = Theme.Muted, BackColor = Color.Transparent };
-        int unit = TextUnit();
-
-        _timestampBox = new ThemeCheckBox { Text = "加时间戳和分包显示", AutoSize = true, Checked = true };
-        Put(row, _timestampBox);
-        _timeoutLabel = Lb("超时时间:");
-        Put(row, _timeoutLabel);
-        _timeoutEdit = new ThemeTextBox { Text = "20", Width = unit * 4 };
-        Put(row, _timeoutEdit);
-        Put(row, Lb("ms"));
-        Put(row, Lb("第"));
-        _verifyNumEdit = new ThemeTextBox { Text = "1", Width = unit * 3 };
-        Put(row, _verifyNumEdit);
-        Put(row, Lb("字节至"));
-        _tailCombo = new ThemeComboBox { Width = unit * 14, DropDownWidth = unit * 42, DropDownStyle = ComboBoxStyle.DropDownList };
-        _tailCombo.Items.AddRange(new object[]
-        {
-            "末尾 (无帧尾字节)",
-            "第-1 (最后1个字节是帧尾,校验插在帧尾前面)",
-            "第-2 (最后2个字节是帧尾,校验插在帧尾前面)",
-            "第-3 (最后3个字节是帧尾,校验插在帧尾前面)",
-            "第-4 (最后4个字节是帧尾,校验插在帧尾前面)",
-        });
-        _tailCombo.SelectedIndex = 0;
-        Put(row, _tailCombo);
-        Put(row, Lb("加校验"));
-        _verifyBox = new ThemeComboBox { Width = unit * 12, DropDownStyle = ComboBoxStyle.DropDownList };
-        _verifyBox.Items.AddRange(new object[] { "None", "ModbusCRC16", "CCITT-CRC16", "CRC32", "0-ADD8", "ADD8", "XOR8", "ADD16" });
-        _verifyBox.SelectedIndex = 0;
-        Put(row, _verifyBox);
-        _crcBox = new ThemeTextBox { Width = unit * 8, ReadOnly = true, TabStop = false, ForeColor = Theme.Accent };
-        Put(row, _crcBox);
-        return row;
-    }
+        Text = text,
+        AutoSize = true,
+        Kind = ThemeButton.ButtonKind.Default,
+    };
 
     /// <summary>单行，不换行。控件保持自身宽度，避免把「加时间戳」拆成两行。</summary>
     private FlowLayoutPanel MakeLine() => new RowFlowPanel
@@ -590,11 +579,33 @@ public sealed partial class MainForm : Form
         protected override void OnLayout(LayoutEventArgs levent)
         {
             base.OnLayout(levent);
-            int h = ClientSize.Height - Padding.Vertical;
-            foreach (Control c in Controls)
+            int count = Controls.Count;
+            int start = 0;
+            while (start < count)
             {
-                int y = Padding.Top + Math.Max(0, (h - c.Height) / 2);
-                if (c.Top != y) c.Top = y;
+                int end = start + 1;
+                int prevLeft = Controls[start].Left;
+                while (end < count && Controls[end].Left > prevLeft)
+                {
+                    prevLeft = Controls[end].Left;
+                    end++;
+                }
+                int top = int.MaxValue, bottom = int.MinValue;
+                for (int i = start; i < end; i++)
+                {
+                    Control c = Controls[i];
+                    top = Math.Min(top, c.Top - c.Margin.Top);
+                    bottom = Math.Max(bottom, c.Bottom + c.Margin.Bottom);
+                }
+                int rowHeight = Math.Max(1, bottom - top);
+                for (int i = start; i < end; i++)
+                {
+                    Control c = Controls[i];
+                    int available = rowHeight - c.Margin.Vertical;
+                    int y = top + c.Margin.Top + Math.Max(0, (available - c.Height) / 2);
+                    if (c.Top != y) c.Top = y;
+                }
+                start = end;
             }
         }
     }
@@ -1218,6 +1229,7 @@ public sealed partial class MainForm : Form
         _statusTimer.Start();
         _displayTimer.Tick += (_, _) => DrainDisplay();
         _prewarmTimer.Tick += (_, _) => PrewarmTick();
+        WireMotion();
         FormClosing += OnMainFormClosing;
         FormClosed += (_, _) => _port.Dispose();
     }
@@ -1288,15 +1300,18 @@ public sealed partial class MainForm : Form
         {
             AppendRecv(text);
         }
+        bool idle;
         lock (_displayLock)
         {
-            if (_pendingDisplay.Length == 0 && _pendingReplace is null)
+            idle = _pendingDisplay.Length == 0 && _pendingReplace is null;
+            if (idle)
             {
                 _drainScheduled = false;
                 _displayTimer.Stop();
             }
         }
-        UpdateStatus();
+        // 高频接收时不要每 30ms 刷新整条状态栏；100ms 的状态计时器负责过程显示，停泵时补一次终值。
+        if (idle) UpdateStatus();
     }
 
     /// <summary>
@@ -1317,7 +1332,17 @@ public sealed partial class MainForm : Form
         int selLen = _recvBox.SelectionLength;
         Point scroll = GetRecvScroll();
 
-        AppendFormatted(text);
+        // 一批最多几十 KB；关掉重绘后只做一次最终 Invalidate，避免逐段着色时反复绘制整个文档。
+        SendMessage(_recvBox.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+        try
+        {
+            AppendFormatted(text);
+        }
+        finally
+        {
+            SendMessage(_recvBox.Handle, WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+            _recvBox.Invalidate();
+        }
 
         if (_autoFollow && atBottom)
         {
@@ -1468,6 +1493,7 @@ public sealed partial class MainForm : Form
         Interlocked.Exchange(ref _sentCount, 0);   // 规格：清除窗口把两个计数清 0
         Interlocked.Exchange(ref _recvCount, 0);
         UpdateStatus();
+        ShowToast("已清除接收区");
     }
 
     /// <summary>保存数据：接收窗口内容另存为 SaveWindows 时间戳 .TXT；原始接收缓冲写成 SAVE 时间戳 .DAT。</summary>
@@ -2329,31 +2355,48 @@ public sealed partial class MainForm : Form
 
     private void ToggleMultiPanel()
     {
+        CloseFlyout();
         _prewarmTimer.Stop();
         _prewarmQueue.Clear();
+        FinishAnimation();
         // 规格：切换多条面板；标题在 显示态=隐藏 / 隐藏态=扩展 之间切换。
+        bool show = _split.Panel2Collapsed;
+        _hideToggleButton.Text = show ? "隐藏" : "扩展";
+        if (AnimationsEnabled)
+        {
+            AnimateMultiPanel(show);
+            return;
+        }
         // 展开瞬间的布局也会挪分割线，这段不能记成用户拖过的宽度。
         _adjustingSplit = true;
         try
         {
-            _split.Panel2Collapsed = !_split.Panel2Collapsed;
-            _hideToggleButton.Text = _split.Panel2Collapsed ? "扩展" : "隐藏";
+            _split.Panel2Collapsed = !show;
         }
         finally
         {
             _adjustingSplit = false;
         }
-        if (!_split.Panel2Collapsed) ApplyMultiWidth();
+        if (show) ApplyMultiWidth();
     }
 
     private void ToggleBottomPanels()
     {
         if (_composerPanel is null) return;
+        CloseFlyout();
+        FinishAnimation();
         // 规格：━ 按钮隐藏/恢复设置区与发送区；标题在 ■ / ━ 间切换
-        bool show = !_composerPanel.Visible;
-        _composerPanel.Visible = show;
+        bool show = !_composerShown;
+        _composerShown = show;
         _collapseButton.Text = show ? "━" : "■";
+        if (AnimationsEnabled)
+        {
+            AnimateComposer(show);
+            return;
+        }
+        _composerPanel.Visible = show;
         UpdateComposerLayout();
+        UpdateMinimumHeight();
     }
 
     /// <summary>切换深/浅主题；不自动保存，调用方决定（菜单点击会 AutoSave，启动/导入不保存）。</summary>
@@ -2370,6 +2413,16 @@ public sealed partial class MainForm : Form
         _filePathBox.ForeColor = Theme.Muted;
         _crcBox.BackColor = Theme.Field;
         _crcBox.ForeColor = Theme.Accent;
+        if (_tailCombo is not null)
+        {
+            _tailCombo.ForeColor = Theme.Text;
+            _tailCombo.Invalidate();
+        }
+        if (_verifyBox is not null)
+        {
+            _verifyBox.ForeColor = Theme.Text;
+            _verifyBox.Invalidate();
+        }
 
         _connStatus.ForeColor = Theme.Text;
         _sentStatus.ForeColor = Theme.StatusSend;

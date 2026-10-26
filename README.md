@@ -3,7 +3,7 @@
 按逆向整理出的行为规格，用 **C# WinForms / .NET Framework 4.8** 重写 `sscom5.13.1.exe`（Delphi/VCL 串口网络调试工具）的日常收发功能。
 
 - 行为唯一依据：[sscom5.13.1-rewrite-spec.md](sscom5.13.1-rewrite-spec.md)
-- 当前状态：M1–M9 全部实现；Phase 1 深/浅双主题、Phase 2 三栏工作区与富文本日志已接入；`--selftest` 193/193 通过
+- 当前状态：M1–M9 全部实现；Phase 1 深/浅双主题、Phase 2 三栏工作区、Phase 3A 左栏折叠、Phase 3B 设置浮层、Phase 3C 日志性能/短动效/toast 已接入；`--selftest` 198/198 通过
 - 目标系统：Windows 10/11（自带 .NET Framework 4.8）
 - 原版程序、解包镜像和反编译源码**不在本仓库中**，详见 [_analysis/README.md](_analysis/README.md)
 
@@ -23,6 +23,7 @@
 - 文本发送：`\0 \a \b \t \n \v \f \r \\ \xHH` 转义；可选自动追加 `\r\n`
 - HEX 发送：两字符拼一字节，允许空格/CR/LF；非法字符整段不发并报错
 - 校验模式 0–7：Modbus CRC16、CCITT CRC16、CRC32、0-ADD8、ADD8、XOR8、ADD16；可设帧首跳过字节和帧尾保留字节，CRC32 值显示在旁侧小框
+- 低频发送项收在「发送设置」浮层：帧尾位置、校验算法与 CRC 值；composer 只留 HEX 发送、定时发送和回车换行
 - 单条定时发送；发送文件（256 字节分块 + 5 档块间延时 + 停止按钮 + 进度条）
 - 多条字符串：3 页 × 99 行，共 297 行；每行 HEX、数据、顺序号、延时（ms）、注释、点击发送；顺序号排序后循环发送，`+`/`−` 调发送列宽
 - 终端仿真：在接收框直接输入；支持「回车后发送输入行」「按键立即发送」「本地回显」「回车补 0x0A」四个开关（前两个互斥）
@@ -31,6 +32,7 @@
 ### 接收
 
 - 文本 / HEX 两种显示方式，可随时切换（带时间戳丢失警告）
+- 低频接收项收在「接收设置」浮层：时间戳/分包、超时时间、接收数据到文件
 - 时间戳分包显示；GBK 半个汉字跨包拼接
 - 显示缓冲上限 200K / 500K / 1M / 2M / 5M；状态栏底色随接收量分档
 - 清除窗口；保存数据（原始 `SAVE*.DAT` + 窗口内容 `SaveWindows*.TXT`）
@@ -123,12 +125,27 @@ cd SscomRe/bin/net48
 ./SscomRe.exe --selftest
 ```
 
-- 当前结果：`SELFTEST pass=193 fail=0`
-- 覆盖组包/转义、7 种校验、接收显示与截断、多条发送状态机、ini 往返、终端按键、窗口几何、主窗体布局等
+- 当前结果：`SELFTEST pass=198 fail=0`
+- 覆盖组包/转义、7 种校验、接收显示与截断、多条发送状态机、ini 往返、终端按键、窗口几何、主窗体布局、设置浮层开关、搜索 toast、composer 收起/展开动效等
 - 自检会临时创建主窗体并触发自动保存；开始前会备份现有 `sscom51.ini`，结束后原样恢复（没有则删除）
 - 布局检查按 `DeviceDpi` 缩放测试窗口，100%–200% 缩放下都可复现
 
 正常退出码为 0，失败时返回 1 并打印 `FAIL` 行。自检输出使用系统代码页（中文 Windows 为 GBK）；在 Git Bash 下若显示乱码，可用 `| iconv -f GBK -t UTF-8` 查看。
+
+## 日志压测
+
+```bash
+cd SscomRe/bin/net48
+./SscomRe.exe --bench-log 2 30       # 2 MiB，30 KiB/块，文本显示
+./SscomRe.exe --bench-log 1 30 --hex # HEX 显示
+./SscomRe.exe --bench-log 1 30 --shot bench.png  # 额外保存一张分色日志截图
+```
+
+压测走真实窗体的 `HandleIncoming → DrainDisplay → RTF 插入` 路径，统计每块的平均/最大界面耗时；默认目标为 30 KiB/块，对应 1 MiB/s 接收：
+
+- 文本 2 MiB：avg 15.8ms、max 76.7ms（max 为截断整屏重画），吞吐约 1.8 MiB/s。
+- HEX 1 MiB：avg 52ms、max 465ms。HEX 文本量约为原始数据 3 倍，1 MiB/s 下可能掉帧；原始接收缓冲、计数和保存数据不受影响。
+- `--bench-log` 会备份/恢复 `sscom51.ini`；默认在屏幕外运行，屏幕上的绘制开销会另加约 10–15ms。
 
 ## 发布
 
@@ -149,10 +166,13 @@ HANDOFF.md                    实现/维护交接：架构、不变量、构建�
 REWRITE-PLAN.md               里程碑与实现状态
 _analysis/                    逆向分析脚本、DFM/Ghidra 产物（不含原程序）
 SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
-  Program.cs                  入口；--selftest；全局异常写 crash.log
+  Program.cs                  入口；--selftest / --bench-log；全局异常写 crash.log
   MainForm.cs                 主窗体、菜单、收发编排、ini 读写
-  MainForm.Phase2.cs          三栏工作区、连接栏、日志头和发送区布局
-  MainForm.Log.cs             分色追加、搜索/暂停/复制、速率与缓冲
+  MainForm.Phase2.cs          三栏工作区、连接栏、日志头、发送区和设置浮层布局
+  MainForm.Log.cs             RTF 分色追加、搜索/暂停/复制、速率与缓冲
+  MainForm.Motion.cs          toast 与左栏/抽屉/composer 短动效
+  LogBenchmark.cs             --bench-log 高吞吐压测和截图
+  Toast.cs                    非模态短提示控件
   LogFormatter.cs             日志文本 → 着色片段（纯逻辑）
   Theme.cs                    主题 token、DWM、菜单/状态栏渲染
   ThemeRichTextBox.cs         接收日志富文本框
@@ -186,7 +206,10 @@ SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
 - `N1080` 的 `1` 和 `2` 都映射为 TCPClient（照规格原文的怪癖）
 - 界面按物理像素布局、字体按 DPI 渲染；高 DPI（如 200%）下底栏占比明显变大，建议最大化窗口或降低显示缩放
 - 标题栏使用原生 DWM 深/浅方案（保证拖动/吸附/最大化稳定）；完全自绘标题栏不在本期
-- 接收设置/发送设置目前以底部两行选项直接展示，尚未做成悬浮设置面板；折叠动画也未加入
+- 接收/发送低频项已收进设置浮层；左栏/composer/抽屉有 140ms 短动效；搜索无结果、清除和复制有 toast。保存数据的成功/失败仍按规格使用模态弹窗
+- 文本日志 1 MiB/s 压测平均 15.8ms/30KiB；HEX 显示约 52ms，1 MiB/s 下可能掉帧（原始缓冲与计数不受影响）
+- 100%/150% DPI 尚未单独截图回归；已核对 125%/200% 窗口和 192 DPI 自检
+- 本机没有 COM 口；真实串口/网口的收发热路径仍需在目标硬件上复验
 - 高 DPI 窄屏（如 1440×900 @200%）下三栏会拥挤；左栏会自动折叠成 rail，日志搜索框和副标题也会自动收起；推荐 100%–150% 或宽窗口
 - 打开/保存文件、字体、颜色和 MessageBox 使用系统原生对话框
 - 自检不依赖真实串口/网络硬件；实机串口收发仍需在目标机器上复验

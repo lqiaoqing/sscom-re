@@ -1,7 +1,7 @@
 # 交接文档：SscomRe（SSCOM 5.13.1 的 C# 重写）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前状态（2026-10-23）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区与富文本日志已接入，`--selftest` 193/193 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前状态（2026-10-25）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏折叠、Phase 3B 设置浮层、Phase 3C RTF 日志性能/短动效/toast 已接入，`--selftest` 198/198 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -53,7 +53,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   PortSettingsDialog.cs 自建「更多串口设置」对话框
   WindowPlacement.cs    N1082–N1085 窗口几何夹取
   InputNormalizer.cs    行内数字框归一化（光标规则）
-  SelfTest.cs           --selftest 用例（当前 193 项）
+  SelfTest.cs           --selftest 用例（当前 198 项）
 ```
 
 ---
@@ -74,11 +74,13 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 | UI Phase 1 深/浅主题（换皮，不重排） | ✅ 已建；DWM 深/浅标题栏、自绘控件、暗色菜单/下拉/滚动条、自绘多条分页、N1092 记忆 |
 | UI Phase 2 三栏工作区 + 富文本日志 | ✅ 已建；左连接栏、中日志/composer、右多条抽屉、RX/TX/错误分色、搜索/暂停/复制、速率/缓冲 |
 | UI Phase 3A 左栏折叠 | ✅ 已建；窄图标 rail、手动/自动折叠、N1093 持久化 |
+| UI Phase 3B 设置浮层 | ✅ 已建；接收/发送低频项移入浮层，点外部/Esc 关闭，composer 只留常用项 |
+| UI Phase 3C 性能/动效/toast | ✅ 已建；RTF 批量日志、140ms 面板过渡、搜索/清除/复制 toast、`--bench-log` |
 
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `SscomRe.exe --selftest` → `pass=193 fail=0`
+- `SscomRe.exe --selftest` → `pass=198 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境无真实 COM 口，串口/网络的实机收发热路径仍需在目标硬件上复验
 
@@ -92,7 +94,8 @@ dotnet build -c Release
 # 输出固定为 SscomRe/bin/net48/SscomRe.exe（csproj 固定 OutputPath）
 
 cd bin/net48
-./SscomRe.exe --selftest          # 必须 pass=193 fail=0
+./SscomRe.exe --selftest          # 必须 pass=198 fail=0
+./SscomRe.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
 
 # 冒烟：跑 ≥5 秒，检查没崩
 rm -f crash.log
@@ -150,12 +153,16 @@ taskkill //IM SscomRe.exe //F
 - 左栏：竖排连接栏，`SidebarWidth() = max(240, Theme.Scale(this,280))`；串口和网络字段分别是 `_serialSection`/`_netSection`，由 `UpdateModePanels` 显隐；端口/协议统一由 `_portCombo` 选。
 - 中心：`_split.Panel1` 内是日志头 + 富文本日志 + composer；`_split.Panel2` 是多条抽屉。默认抽屉宽约 340 逻辑像素，用户拖动后记录宽；N1086 旧值 480–580 仍按旧固定宽处理。
 - 工具栏：打开文件 + 路径框（`WrapRowPanel.StretchControl` 填满中段）+ 右 发送文件/停止/清发送区/最前/保存参数/扩展/━；清除窗口和保存数据移到日志头。
-- composer：`_settingsRow1`（HEX显示/接收落文件/HEX发送/定时/加回车）+ `_settingsRow2`（时间戳/超时/帧首/帧尾/校验/CRC）+ `_sendArea`；`UpdateComposerGridRows` 写三行绝对高度，`ComposerHeight` 供中心行高和 `UpdateMinimumHeight` 用。`━` 通过隐藏 `_composerPanel` 折叠 composer。
+- composer：`_settingsRow1`（HEX显示/HEX发送/定时发送/加回车换行 + 右侧「接收设置/发送设置」入口）+ `_sendArea`；低频项在 `_recvSettingsFlyout`/`_sendSettingsFlyout` 中，composer 只写两行绝对高度。`ComposerHeight` 供中心行高和 `UpdateMinimumHeight` 用；`━` 通过隐藏 `_composerPanel` 折叠 composer。
+- 设置浮层：入口在 composer 右侧；接收设置含时间戳/超时/接收文件，发送设置含帧尾位置/校验/CRC。浮层是窗体子控件（不是 Form），参与主题重绘；`ShowFlyout` 按锚点向上定位、`SizeFlyout` 每次按当前 DPI 更新行宽和高度；`FlyoutDismissFilter` 处理点外部，`ProcessCmdKey` 处理 Esc，`WM_ACTIVATEAPP` 处理切到其它应用。浮层内下拉框展开时不要关闭浮层。
+- 动效（`MainForm.Motion.cs`）：左栏、composer、右抽屉统一 140ms ease-out，共用一个 15ms `_animTimer`，结束即停；`FinishAnimation` 在开始新动效前把上一段落到终点。自检设 `AnimationsEnabled=false`，并单独验证 composer 收起/展开两条路径。
+- toast（`Toast.cs`）：非模态、2.2 秒自动消失，显示在日志底部居中；搜索无结果、清除接收区、复制纯数据使用；保存数据的成功/失败弹窗按规格保留模态，不要改成 toast。
+- 日志性能：`AppendFormatted` 一次构造 RTF 后 `SelectedRtf` 单次插入，批量追加时 `WM_SETREDRAW` 关闭重绘；`DrainDisplay` 不再每 30ms 刷整条状态栏。`--bench-log [MiB] [chunkKiB] [--hex] [--shot path]` 用真实窗体路径压测。2 MiB 文本 avg 15.8ms/30KiB、max 76.7ms（截断重画）；1 MiB HEX avg 52ms、max 465ms，HEX 高吞吐仍可能掉帧，但原始缓冲/计数不受影响。
 - 日志头：`LogBarHeight = max(44, Theme.Scale(this,44))`；标题/副标题固定高度 + `RowFlowPanel` 垂直居中；搜索/暂停/清除/保存放在右侧 `RowFlowPanel`，搜索框宽度随 DPI 缩放。日志头的 TableLayoutPanel 必须有显式 Percent 行，否则默认 100px 会压住日志。
-- `WrapRowPanel`：宽度固定为父宽、按 `GetPreferredSize(width)` 自动增高、按视觉行垂直居中；`MarkRightGroup`/`AlignRightGroup` 用于右侧组；`StretchControl` 用于路径框填充。设置里的“HEX发送/定时发送/加回车换行”仍用 `MakeGroup` 成组折行。
+- `WrapRowPanel`：宽度固定为父宽、按 `GetPreferredSize(width)` 自动增高、按视觉行垂直居中；`MarkRightGroup`/`AlignRightGroup` 用于右侧组；`StretchControl` 用于路径框填充。设置入口在右侧组；`RowFlowPanel` 的 `OnLayout` 按“视觉行”分别垂直居中，浮层内换行时不能把所有子控件拉回同一行。
 - 窗口最小尺寸基准 820×560；`UpdateMinimumHeight()` 用 `ComposerHeight` 保证日志/发送区/状态栏不被挤出；`ScheduleResponsiveRelayout()` 在缩放后延迟终排并更新侧栏宽度/composer 行高/日志头响应式。
 - 多条字符串 297 行不用 TableLayoutPanel：`MultiRowsPanel` 自绘布局（固定行高/列宽，一次定位），分 3 页；首次展开前 `_prewarmTimer` 在 OnShown 后分批创建句柄（每 20ms 8 个）。
-- 高 DPI：200% 窄屏三栏会拥挤；`UpdateLogHeaderResponsive` 在中心宽度 <620 隐藏搜索框、<420 隐藏副标题。改动布局时在 100% 和 200% 下都要看。
+- 高 DPI：200% 窄屏三栏会拥挤；`UpdateLogHeaderResponsive` 在中心宽度 <620 隐藏搜索框、<420 隐藏副标题。改动布局时在 100% 和 200% 下都要看；当前已在 192 DPI 自检、125%/200% 窗口截图核对，100%/150% 尚未单独回归。
 
 ### 5.6 深/浅主题 / 自绘控件（Phase 1）
 
@@ -175,7 +182,7 @@ taskkill //IM SscomRe.exe //F
 - 复选框：`ThemeCheckBox` 勾选用琥珀色，`Highlighted` 控制暖色标签底；`StatusTick` 的 `Highlight` 只改这个属性，不要再设 `BackColor=Yellow`。
 - 文本框：`ThemeTextBox` 提供 `PlaceholderText`（路径框“未选择文件”），并在句柄创建时尝试 `SetWindowTheme(..., "DarkMode_Explorer")` 让原生滚动条变暗。
 - 多条字符串 3 页不再用 `TabControl`（原生页框在深色下始终有浅色边），改为 `pageHost` + `pageBar` 自绘分段按钮；`_multiPages`/`_multiTabs` 管理显隐。自检按“第1/2/3页”按钮计数，不按 `TabPage`。
-- 发送区的两行选项高度额外 +4px（`UpdateComposerGridRows`），给自绘下拉框留 Margin。
+- composer 设置行高度按 `RowHeightOf` 额外 +4px（`UpdateComposerGridRows`），给自绘下拉框/按钮留 Margin。
 - 禁止在深色控件上再用 `SystemColors.Control/Window/WindowText` 或 `Color.White/Yellow`；所有颜色走 `Theme` token。
 
 ### 5.7 Phase 2 工作区 / 富文本日志
@@ -184,7 +191,7 @@ taskkill //IM SscomRe.exe //F
 - 左栏：`BuildSidebar`/`BuildSerialSection`/`BuildNetSection`；共用 `_portCombo`，串口/网络字段用 `_serialSection`/`_netSection` 显隐；`UpdateModePanels` 不再碰旧的三行数组。
 - 左栏折叠：`BuildRail` 生成窄 rail（展开 `»`、状态点、模式/端口缩写、打开/关闭）；`_sideContent` 与 `_railPanel` 二选一显示。`SetSidebarCollapsed(collapsed,persist,manual,automatic)` 写 `_bodyLayout` 列宽；手动操作持久化 N1093，`_sideUserCollapsed` 保存用户偏好（自动折叠不写）。`ScheduleResponsiveRelayout` 在宽 < `SidebarWidth()+720` 时自动折叠，变宽自动展开；`_sideManualOverride` 一旦手动操作，本次运行不再自动切换。轨道宽度 `RailWidth()`、rail 标签/按钮 `UpdateSidebarRail`。
 - N1093 与 N1092 一样是重写版新增 ini 键（0 展开、1 折叠），原版忽略。
-- composer：`BuildComposer` 使用 `_settingsRow1`/`_settingsRow2`/`_sendArea` 三个控件，`UpdateComposerGridRows` 写行高；`━` 按钮通过 `_composerPanel.Visible` 折叠整个 composer。
+- composer：`BuildComposer` 使用 `_settingsRow1` + `_sendArea` 两个控件；低频设置项在接收/发送浮层中（见 §5.5），`UpdateComposerGridRows` 写行高；`━` 按钮通过 `_composerPanel.Visible` 折叠整个 composer。
 - 接收框：`ThemeRichTextBox`（继承 RichTextBox），字段仍是 `_recvBox`；线程模型不变，所有富文本操作只在界面线程的 `DrainDisplay` 路径执行。
 - 分色：`LogFormatter.Parse` 把文本拆成 Timestamp/Rx/Tx/Error/Data/Hex；`AppendFormatted` 用 `SelectionColor/SelectionBackColor` 逐段追加。TX 行暖底、错误行红底，来源是 `Theme.TxWash/ErrorWash`。
 - 重画：主题/字体/颜色变化用 `RenderLogAll()`，它基于**当前可见文本**重解析，因此发送回显和终端本地输入也会保留；切换 HEX/文本显示用 `RenderLogBuffer()`，基于 `_receive.HexText/TextAccum`。不要用 `_receive` 缓冲去重画主题，否则会丢发送回显。
@@ -241,9 +248,12 @@ taskkill //IM SscomRe.exe //F
 - 打开文件预览用原字节直接按 Latin-1 式字符累积文本，再经 `ReceiveDisplay.SetPreviewBuffers` 替换预览缓冲；原始接收缓冲和接收计数不动。
 - 网络服务端本地端口非法时选择“提示后不启动”（规格此处原程序响应未细读）。
 - 标题栏继续用 DWM 深/浅原生方案（用户确认），完全自绘标题栏不在本期；浅色模式下系统文件/字体/颜色对话框观感正常，深色模式下这些原生对话框仍是浅色。
-- 接收/发送设置目前仍在 composer 的两行里直接展示，没有做悬浮设置面板；折叠动画也未加入。
+- 保存数据的成功/失败提示按规格保留模态 MessageBox；toast 只用于搜索无结果、清除接收区、复制纯数据这类规格未规定弹窗的 UI 反馈。
+- 1 MiB/s 的 HEX 显示比文本模式重约 3 倍；当前压测 avg 52ms/30KiB，可能掉帧，但原始接收缓冲、计数和保存数据不受影响。文本模式 avg 15.8ms，已满足 30ms 预算。
+- 本机没有 COM 口；真实串口/DTR/RTS/发送文件/定时发送与真实网口仍需在目标硬件复验。TCP/UDP 本机回环自检仍在 `--selftest` 中。
+- 接收/发送低频项、短动效和 toast 已实现；剩余 100%/150% DPI 截图与真实硬件复验。
 - 200% DPI + 窄屏（如 1440×900）下三栏会拥挤；日志头会自动收起搜索框/副标题，推荐 100%–150% 或宽度足够的窗口。
-- 富文本日志按段设置 SelectionColor/SelectionBackColor；极高波特率下若出现重绘瓶颈，优先把追加改成批量/自定义绘制，不要退回单色 TextBox。
+- 富文本日志按批构造 RTF、`SelectedRtf` 单次插入；不要改回逐段 `SelectionColor`/`AppendText`，长日志会退化成 O(n²)。HEX 1 MiB/s 仍是已知瓶颈，必要时再做按需降级绘制。
 
 ---
 
@@ -266,12 +276,13 @@ taskkill //IM SscomRe.exe //F
 详细计划见 [`REWRITE-PLAN.md`](REWRITE-PLAN.md) 的 Phase 3 段。按用户优先级从高到低：
 
 1. ✅ Phase 3A：左侧栏 rail 折叠、N1093、窄窗自动折叠。
-2. Phase 3B：接收/发送低频设置浮层，composer 只留常用项。
-3. Phase 3C：高波特率日志压测、短动效、toast 和 DPI 回归。
-4. 在真实串口/网口上复验三栏布局：接收分色、搜索/暂停、发送回显、发送文件、定时发送、TCP 服务端多连接、UDP。
-5. 完全自绘标题栏（用户当前选择保留原生 DWM，不要擅自改）。
-6. 规格「还不能当规则用的部分」里的烧写器、波形等——**用户已排除，不要做**。
-7. 若需要单文件分发，可在 csproj 增加 Costura/ILMerge 方案；当前分发 exe + config 即可，目标机只需 .NET Framework 4.8。
+2. ✅ Phase 3B：接收/发送低频设置浮层，composer 只留常用项。
+3. ✅ Phase 3C：RTF 日志性能、140ms 短动效、搜索/清除/复制 toast；`--bench-log` 可复现。
+4. 在真实串口/网口上复验三栏布局：接收分色、搜索/暂停、发送回显、发送文件、定时发送、TCP 服务端多连接、UDP；本机无 COM 口。
+5. 补 100%/150% DPI 截图回归；当前已核对 125%/200% 与 192 DPI 自检。
+6. 完全自绘标题栏（用户当前选择保留原生 DWM，不要擅自改）。
+7. 规格「还不能当规则用的部分」里的烧写器、波形等——**用户已排除，不要做**。
+8. 若需要单文件分发，可在 csproj 增加 Costura/ILMerge 方案；当前分发 exe + config 即可，目标机只需 .NET Framework 4.8。
 
 ---
 
