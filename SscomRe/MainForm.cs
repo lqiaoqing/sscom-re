@@ -198,6 +198,7 @@ public sealed partial class MainForm : Form
     private ThemeChip _sideModeLabel = null!;
     private SideStatusCard _sideStatusCard = null!;
     private LogPortPicker _logPortPicker = null!;
+    private ThemeButton _logOpenButton = null!;
     private Label _logSubLabel = null!;
     private Control? _portPopupAnchor;
     private bool _portOpenIntent;
@@ -679,6 +680,11 @@ public sealed partial class MainForm : Form
     /// <summary>不换行行内的垂直居中（固定行高区域用）。</summary>
     private sealed class RowFlowPanel : FlowLayoutPanel
     {
+        public RowFlowPanel()
+        {
+            DoubleBuffered = true;              // 行内控件改文字/状态时不再闪一下
+        }
+
         protected override void OnLayout(LayoutEventArgs levent)
         {
             base.OnLayout(levent);
@@ -2288,6 +2294,7 @@ public sealed partial class MainForm : Form
         _progressBar.Visible = true;
         _sendFileButton.Enabled = false;
         _openButton.Enabled = false;
+        _logOpenButton.Enabled = false;         // 发送文件期间不允许从日志头关串口
 
         var mode = _netMode;
         string host = _remoteIpBox.Text.Trim();
@@ -2367,6 +2374,7 @@ public sealed partial class MainForm : Form
         _progressBar.Visible = false;
         _sendFileButton.Enabled = true;
         _openButton.Enabled = true;
+        _logOpenButton.Enabled = true;
         _abortFlag = true;                      // 规格：收尾置 0x4ED579 = 1
         _sendingFile = false;
         UpdateStatus();
@@ -3357,6 +3365,20 @@ public sealed partial class MainForm : Form
             string baudText = _baudCombo.SelectedIndex <= 0 ? baud.ToString() : _baudCombo.Text;
             _connStatus.Text = $"{portName}{state}{baudText}bps,{_port.LineDescription()}";
             _logPortPicker?.SetDisplay(portName.Length > 0 ? portName : "未选择端口");
+            if (_logOpenButton is not null)
+            {
+                string label = open ? "关闭" : "打开";
+                if (_logOpenButton.Text != label) _logOpenButton.Text = label;
+                ThemeButton.ButtonKind kind = open ? ThemeButton.ButtonKind.Outline : ThemeButton.ButtonKind.Primary;
+                if (_logOpenButton.Kind != kind)
+                {
+                    _logOpenButton.Kind = kind;
+                    _logOpenButton.Invalidate();
+                }
+                if (_logOpenButton.Enabled != _openButton.Enabled) _logOpenButton.Enabled = _openButton.Enabled;
+                if (!_logOpenButton.Visible) _logOpenButton.Visible = true;
+                _rowTip.SetToolTip(_logOpenButton, open ? "关闭串口" : "打开串口");
+            }
             if (_logSubLabel is not null)
                 _logSubLabel.Text = $"{baudText}bps · {_port.LineDescription()}";
             _sideStatusCard?.SetStatus(open, open ? "已打开" : "未打开",
@@ -3368,6 +3390,7 @@ public sealed partial class MainForm : Form
             // 规格：网络模式面板 3 是整个全局串 0x4ED538（下拉文本 + 本机 IP 文本）
             _connStatus.Text = $"{_portCombo.Text} {_localIpCombo.Text}  {(_net.Ready ? "已连接" : "未连接")}";
             _logPortPicker?.SetDisplay(_portCombo.Text);
+            if (_logOpenButton is { Visible: true }) _logOpenButton.Visible = false;   // 网络模式没有串口开关
             if (_logSubLabel is not null)
                 _logSubLabel.Text = $"{_remoteIpBox.Text}:{_remotePortBox.Text} · {(_net.Ready ? "已连接" : "未连接")}";
             _sideStatusCard?.SetStatus(_net.Ready, _net.Ready ? "已连接" : "未连接",

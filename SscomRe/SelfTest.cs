@@ -864,6 +864,10 @@ internal static class SelfTest
             foreach (var c in AllControls(form))
                 if (c is Button { Text: "«" } b) sidebarCollapse = b;
             CheckText("日志头有收起开关", sidebarCollapse is { Visible: true } ? "yes" : "no", "yes");
+            Button? logOpen = null;
+            foreach (var c in AllControls(form))
+                if (c is Button { Text: "打开" or "关闭" } b) logOpen = b;
+            CheckText("日志头有串口开关", logOpen is { Visible: true } ? "yes" : "no", "yes");
             if (sidebarCollapse is not null)
             {
                 sidebarCollapse.PerformClick();

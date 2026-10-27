@@ -307,6 +307,7 @@ public sealed partial class MainForm
         DetectMode();
         SyncPortField();
         SchedulePortReopen();
+        UpdateStatus();                 // 端口关闭时也要立刻刷新日志头/状态栏
     }
 
     private void CommitManualPort(string text)
@@ -317,6 +318,7 @@ public sealed partial class MainForm
         DetectMode();
         SyncPortField();
         SchedulePortReopen();
+        UpdateStatus();                 // 手动输入端口同样即时刷新显示
     }
 
     internal void SetSidebarCollapsedForTest(bool collapsed) =>
@@ -666,6 +668,24 @@ public sealed partial class MainForm
         };
         _logPortPicker.PickerRequested += (_, _) => TogglePortPopup(_logPortPicker);
         _rowTip.SetToolTip(_logPortPicker, "点击快捷切换串口/网络模式");
+        // 日志头里的串口开关：不用回连接栏就能开/关当前串口。
+        // 宽度按“打开/关闭”里较宽的那个定死，切换文字时不会推着后面的速率文字左右跳。
+        int openLabelWidth = Math.Max(
+            TextRenderer.MeasureText("打开", Font, new Size(int.MaxValue, int.MaxValue),
+                TextFormatFlags.NoPadding).Width,
+            TextRenderer.MeasureText("关闭", Font, new Size(int.MaxValue, int.MaxValue),
+                TextFormatFlags.NoPadding).Width);
+        _logOpenButton = new ThemeButton
+        {
+            Text = "打开",
+            AutoSize = false,
+            Width = openLabelWidth + Theme.Scale(this, 18),
+            Height = Font.Height + 12,
+            Kind = ThemeButton.ButtonKind.Primary,
+            Margin = new Padding(0, 0, 9, 0),
+        };
+        _logOpenButton.Click += (_, _) => ToggleOpen();
+        _rowTip.SetToolTip(_logOpenButton, "打开/关闭串口");
         _logSubLabel = new Label
         {
             Text = "",
@@ -691,6 +711,7 @@ public sealed partial class MainForm
             SetSidebarCollapsed(!_sideCollapsed, persist: true, manual: true, automatic: false);
         labels.Controls.Add(_sidebarToggle);
         labels.Controls.Add(_logPortPicker);
+        labels.Controls.Add(_logOpenButton);
         labels.Controls.Add(_logSubLabel);
         UpdateSidebarToggle();
         bar.Controls.Add(labels, 0, 0);
@@ -752,13 +773,17 @@ public sealed partial class MainForm
         if (_logPortPicker is null || _logSubLabel is null) return;
         _logSubLabel.ForeColor = Theme.Muted;
         int h = Math.Max(Font.Height + 6, _logPortPicker.Font.Height + 6);
-        int subWidth = TextRenderer.MeasureText(_logSubLabel.Text, _logSubLabel.Font,
+        int pickerWidth = Math.Max(40, _logPortPicker.PreferredWidth);
+        int subWidth = Math.Max(40, TextRenderer.MeasureText(_logSubLabel.Text, _logSubLabel.Font,
             new Size(int.MaxValue, int.MaxValue),
-            TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width + 20;
+            TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width + 20);
+        // 尺寸没变就不要重排：UpdateStatus 很频繁，白白 PerformLayout 会让整行闪。
+        if (_logPortPicker.Width == pickerWidth && _logPortPicker.Height == h &&
+            _logSubLabel.Width == subWidth && _logSubLabel.Height == h) return;
         _logPortPicker.Height = h;
-        _logPortPicker.Width = Math.Max(40, _logPortPicker.PreferredWidth);
+        _logPortPicker.Width = pickerWidth;
         _logSubLabel.Height = h;
-        _logSubLabel.Width = Math.Max(40, subWidth);
+        _logSubLabel.Width = subWidth;
         _logPortPicker.Parent?.PerformLayout();
     }
 
