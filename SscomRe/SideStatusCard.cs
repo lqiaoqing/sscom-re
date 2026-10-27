@@ -9,6 +9,8 @@ internal sealed class SideStatusCard : Control
     private bool _open;
     private string _state = "未打开";
     private string _meta = "";
+    private Font? _stateFont;
+    private Font? _metaFont;
 
     public SideStatusCard()
     {
@@ -18,6 +20,27 @@ internal sealed class SideStatusCard : Control
         AutoSize = false;
         Height = 46;
         BackColor = Color.Transparent;
+    }
+
+    protected override void OnFontChanged(EventArgs e)
+    {
+        _stateFont?.Dispose();
+        _stateFont = null;
+        _metaFont?.Dispose();
+        _metaFont = null;
+        base.OnFontChanged(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _stateFont?.Dispose();
+            _stateFont = null;
+            _metaFont?.Dispose();
+            _metaFont = null;
+        }
+        base.Dispose(disposing);
     }
 
     public void SetStatus(bool open, string state, string meta)
@@ -54,7 +77,7 @@ internal sealed class SideStatusCard : Control
             g.FillEllipse(brush, x, cy - dotSize / 2, dotSize, dotSize);
 
         x += dotSize + Theme.Scale(this, 8);
-        using var stateFont = new Font(Font, FontStyle.Bold);
+        Font stateFont = _stateFont ??= new Font(Font, FontStyle.Bold);
         Size stateSize = TextRenderer.MeasureText(_state, stateFont, new Size(int.MaxValue, int.MaxValue),
             TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
         TextRenderer.DrawText(g, _state, stateFont,
@@ -63,7 +86,7 @@ internal sealed class SideStatusCard : Control
 
         x += stateSize.Width + Theme.Scale(this, 8);
         var metaRect = new Rectangle(x, 0, Math.Max(1, Width - x - pad), Height);
-        using var metaFont = new Font(Font.FontFamily, Math.Max(7F, Font.Size - 0.75F));
+        Font metaFont = _metaFont ??= new Font(Font.FontFamily, Math.Max(7F, Font.Size - 0.75F));
         TextRenderer.DrawText(g, _meta, metaFont, metaRect, _open ? Theme.Muted : Theme.Dim,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
             TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);

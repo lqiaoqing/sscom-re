@@ -54,6 +54,10 @@ public sealed partial class MainForm : Form
     private TextBox _timeoutEdit = null!;
     private TextBox _filePathBox = null!;
     private string _recvFileName = "";
+    // 接收存文件保持常开：每包 open/close 在高速接收时是最大的一笔固定开销。
+    private readonly object _recvFileGate = new();
+    private FileStream? _recvFileStream;
+    private string _recvFilePath = "";
     private ComboBox _verifyBox = null!;
     private TextBox _verifyNumEdit = null!;
     private ComboBox _tailCombo = null!;
@@ -121,6 +125,13 @@ public sealed partial class MainForm : Form
     private readonly Panel[] _multiPages = new Panel[IniDocument.MultiPageCount];
     private readonly ThemeButton[] _multiTabs = new ThemeButton[IniDocument.MultiPageCount];
     private readonly ThemeButton?[] _multiCloseTabs = new ThemeButton?[IniDocument.MultiPageCount];
+    private Panel _multiPageHost = null!;
+    // 多条表格的行高/列宽：首次展开某一页时才按这些尺寸建那 99 行。
+    private int _multiRowHeight = 27;
+    private int _multiHexCol = 40;
+    private int _multiOrderCol = 56;
+    private int _multiDelayCol = 72;
+    private int _multiSendCol = 120;
     private ThemeButton _multiAddTab = null!;
     private ThemeChip _multiPageChip = null!;
     private Label _multiTitleLabel = null!;
@@ -131,6 +142,7 @@ public sealed partial class MainForm : Form
     private Label _multiFooterCount = null!;
     private int _multiPageCount = 1;                    // N1094：可见页数，第 1 页始终存在
     private int _multiPage;                             // 当前选中的页下标
+    private IniSnapshot? _multiRowSource;               // 最近一次加载的整张多条表，未建页时从这里补
     private Control _toolBar = null!;
     private bool _relayoutScheduled;
     private bool _updatingMin;
@@ -1102,13 +1114,13 @@ public sealed partial class MainForm : Form
         using (var probe = new ThemeTextBox { Font = Font })
             contentH = probe.PreferredHeight;
         int headerH2 = TextRenderer.MeasureText("字符串(双击注释)", Font).Height + 8;
-        int rowHeight = Math.Max(contentH, headerH2) + 8;
-        int hexCol = Math.Max(36, TextRenderer.MeasureText("HEX", Font).Width + 16);
-        int orderCol = Math.Max(48, TextRenderer.MeasureText("顺序", Font).Width + 16);
-        int delayCol = Math.Max(64, Math.Max(
+        _multiRowHeight = Math.Max(contentH, headerH2) + 8;
+        _multiHexCol = Math.Max(36, TextRenderer.MeasureText("HEX", Font).Width + 16);
+        _multiOrderCol = Math.Max(48, TextRenderer.MeasureText("顺序", Font).Width + 16);
+        _multiDelayCol = Math.Max(64, Math.Max(
             TextRenderer.MeasureText("延时ms", Font).Width,
             TextRenderer.MeasureText("1000", Font).Width) + 18);
-        int sendCol = Math.Max(_multiBtnWidth, TextRenderer.MeasureText("点击发送", Font).Width + 16);
+        _multiSendCol = Math.Max(_multiBtnWidth, TextRenderer.MeasureText("点击发送", Font).Width + 16);
 
         var cardHost = new Panel
         {
@@ -1118,27 +1130,14 @@ public sealed partial class MainForm : Form
             Margin = new Padding(0),
         };
         var card = new CardPanel { Dock = DockStyle.Fill, Padding = new Padding(1), Margin = new Padding(0) };
-        var pageHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Margin = new Padding(0) };
-        card.Controls.Add(pageHost);
+        _multiPageHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Margin = new Padding(0) };
+        card.Controls.Add(_multiPageHost);
         cardHost.Controls.Add(card);
         root.Controls.Add(cardHost, 0, 3);
 
         int tabH = Math.Max(26, Font.Height + 10);
         for (int page = 0; page < IniDocument.MultiPageCount; page++)
         {
-            var grid = BuildMultiGrid(page, rowHeight, hexCol, orderCol, delayCol, sendCol);
-            _multiGrids[page] = grid;
-            var scroll = new BufferedPanel
-            {
-                Dock = DockStyle.Fill,
-                AutoScroll = true,
-                BackColor = Theme.Surface,
-                Visible = page == 0,
-            };
-            scroll.Controls.Add(grid);
-            pageHost.Controls.Add(scroll);
-            _multiPages[page] = scroll;
-
             var tab = new ThemeButton
             {
                 Text = $"第{page + 1}页",
@@ -1170,6 +1169,8 @@ public sealed partial class MainForm : Form
                 _multiCloseTabs[page] = close;
             }
         }
+        // 第 1 页立即建；第 2/3 页第一次切到（或点＋）时再建那 99 行，启动省掉约 2/3 控件。
+        EnsureMultiPageBuilt(0);
 
         _multiAddTab = new ThemeButton
         {
@@ -1544,20 +1545,21 @@ public sealed partial class MainForm : Form
             Color stripe = Theme.Mix(Theme.Surface, Theme.Surface2, Theme.IsLight ? 0.36F : 0.28F);
             int first = Math.Max(1, clip.Top / rh);
             int last = Math.Min(99, clip.Bottom / rh + 1);
-            for (int row = first; row <= last; row++)
+            int barWidth = Math.Max(1, Theme.Scale(this, 2));
+            using (var stripeBrush = new SolidBrush(stripe))
+            using (var hoverBrush = new SolidBrush(Theme.WithAlpha(Theme.IsLight ? 14 : 20, Theme.Accent)))
+            using (var hoverBar = new SolidBrush(Theme.WithAlpha(180, Theme.Accent)))
             {
-                int y = row * rh;
-                if (row % 2 == 0)
+                for (int row = first; row <= last; row++)
                 {
-                    using var fill = new SolidBrush(stripe);
-                    g.FillRectangle(fill, 0, y, Width, rh);
-                }
-                if (row == _hoverRow)
-                {
-                    using var fill = new SolidBrush(Theme.WithAlpha(Theme.IsLight ? 14 : 20, Theme.Accent));
-                    g.FillRectangle(fill, 0, y, Width, rh);
-                    using var bar = new SolidBrush(Theme.WithAlpha(180, Theme.Accent));
-                    g.FillRectangle(bar, 0, y + 5, Math.Max(1, Theme.Scale(this, 2)), Math.Max(1, rh - 10));
+                    int y = row * rh;
+                    if (row % 2 == 0)
+                        g.FillRectangle(stripeBrush, 0, y, Width, rh);
+                    if (row == _hoverRow)
+                    {
+                        g.FillRectangle(hoverBrush, 0, y, Width, rh);
+                        g.FillRectangle(hoverBar, 0, y + 5, barWidth, Math.Max(1, rh - 10));
+                    }
                 }
             }
 
@@ -1579,6 +1581,9 @@ public sealed partial class MainForm : Form
                     Math.Max(8, Theme.Scale(this, 16)), Math.Max(1, Theme.Scale(this, 2)));
             }
 
+            using var fieldBrush = new SolidBrush(Theme.Field);
+            using var borderPen = new Pen(Theme.BorderSoft, 1);
+            using var focusPen = new Pen(Theme.AccentBright, Math.Max(2, Theme.Scale(this, 2)));
             foreach (Control c in Controls)
             {
                 if (c is not TextBox || c.Tag is not Point cell || cell.Y is not (1 or 3 or 4)) continue;
@@ -1586,12 +1591,8 @@ public sealed partial class MainForm : Form
                 Rectangle field = Rectangle.Inflate(c.Bounds, 2, 2);
                 if (!clip.IntersectsWith(field)) continue;
                 using GraphicsPath path = Theme.RoundedRect(field, Theme.Scale(this, 7));
-                using (var fill = new SolidBrush(Theme.Field))
-                    g.FillPath(fill, path);
-                bool focused = ReferenceEquals(c, _focusCell);
-                using var pen = new Pen(focused ? Theme.AccentBright : Theme.BorderSoft,
-                    focused ? Math.Max(2, Theme.Scale(this, 2)) : 1);
-                g.DrawPath(pen, path);
+                g.FillPath(fieldBrush, path);
+                g.DrawPath(ReferenceEquals(c, _focusCell) ? focusPen : borderPen, path);
             }
         }
 
@@ -1841,6 +1842,8 @@ public sealed partial class MainForm : Form
     /// <summary>最多 30ms 合并刷新一次，避免高频小段逐条重绘造成跳动。</summary>
     private void DrainDisplay()
     {
+        // 整屏重画进行中：先不动接收框，数据留在队列里，画完再追平。
+        if (_renderBusy) return;
         string text;
         string? replace;
         lock (_displayLock)
@@ -1974,21 +1977,47 @@ public sealed partial class MainForm : Form
 
     private void AppendRecvFile(string path, byte[] data)
     {
-        try
+        lock (_recvFileGate)
         {
-            using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            fs.Write(data, 0, data.Length);
+            try
+            {
+                if (_recvFileStream is null ||
+                    !string.Equals(_recvFilePath, path, StringComparison.OrdinalIgnoreCase))
+                {
+                    _recvFileStream?.Dispose();
+                    _recvFileStream = null;
+                    _recvFilePath = path;
+                    _recvFileStream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                }
+                _recvFileStream.Write(data, 0, data.Length);
+            }
+            catch
+            {
+                // 打开/写入失败时按原行为静默丢弃，并释放句柄等下一次重试
+                try { _recvFileStream?.Dispose(); } catch { }
+                _recvFileStream = null;
+            }
         }
-        catch
+    }
+
+    /// <summary>关闭接收文件句柄（取消勾选或退出时）。</summary>
+    private void CloseRecvFile()
+    {
+        lock (_recvFileGate)
         {
-            // 原程序打开失败时也只是写不进去，不弹窗
+            try { _recvFileStream?.Dispose(); } catch { }
+            _recvFileStream = null;
+            _recvFilePath = "";
         }
     }
 
     private void OnRecvToFileChanged()
     {
         if (!_recvToFileBox.Checked)
+        {
+            CloseRecvFile();
             return;
+        }
         string piece;
         if (_netMode == NetMode.TcpClient) piece = "TCPCLIENT";
         else if (_netMode == NetMode.TcpServer) piece = "TCPSERVER";
@@ -2009,7 +2038,7 @@ public sealed partial class MainForm : Form
     private void OnHexDisplayClicked()
     {
         // 规格：加时间戳勾选且接收框里出现时间戳标记（← 或 →）时先警告，点“否”翻回复选框
-        if (_timestampBox.Checked && (_recvBox.Text.Contains('←') || _recvBox.Text.Contains('→')))
+        if (_timestampBox.Checked && LogHasTimestampMarkers())
         {
             var answer = MessageBox.Show(this,
                 "注意！！！！！！！！\r\n已显示的时间戳和发送数据的显示可能会丢失！\r\n时间戳显示将会从新的数据开始。\r\n\r\n按“是”切换显示方式且时间戳丢失，按“取消”返回原状态.",
@@ -2024,8 +2053,19 @@ public sealed partial class MainForm : Form
         RenderLogBuffer();
     }
 
+    /// <summary>只在控件内原地查找标记，避免为判断一次把整段 1M 字符复制成字符串。</summary>
+    private bool LogHasTimestampMarkers()
+    {
+        if (!_recvBox.IsHandleCreated)
+            return _recvBox.Text.Contains('←') || _recvBox.Text.Contains('→');
+        if (_recvBox.TextLength == 0) return false;
+        return _recvBox.Find("←", 0, RichTextBoxFinds.None) >= 0
+            || _recvBox.Find("→", 0, RichTextBoxFinds.None) >= 0;
+    }
+
     private void ClearReceive()
     {
+        CancelRenderLog();                    // 终止未完成的整屏重画并恢复重绘
         ClearSearchHighlight();
         _recvBox.Clear();
         _receive.Clear();                     // 三个累积串与半字节状态一并清空
@@ -2404,9 +2444,12 @@ public sealed partial class MainForm : Form
         {
             var modem = _port.ModemStatus();
             if (modem is { } m)
-                _modemStatus.Text = $"CTS={(m.Cts ? 1 : 0)} DSR={(m.Dsr ? 1 : 0)} RLSD={(m.Rlsd ? 1 : 0)}";
+            {
+                string text = $"CTS={(m.Cts ? 1 : 0)} DSR={(m.Dsr ? 1 : 0)} RLSD={(m.Rlsd ? 1 : 0)}";
+                if (_modemStatus.Text != text) _modemStatus.Text = text;
+            }
         }
-        else
+        else if (_modemStatus.Text != "CTS=- DSR=- RLSD=-")
         {
             _modemStatus.Text = "CTS=- DSR=- RLSD=-";
         }
@@ -2439,12 +2482,14 @@ public sealed partial class MainForm : Form
     {
         if (c is ThemeCheckBox check)
         {
+            if (check.Highlighted == on) return;   // 100ms 轮询，状态没变就别重绘
             check.Highlighted = on;
             check.Invalidate();
         }
         else
         {
-            c.BackColor = on ? Theme.WithAlpha(30, Theme.Amber) : Theme.Canvas;
+            Color back = on ? Theme.WithAlpha(30, Theme.Amber) : Theme.Canvas;
+            if (c.BackColor != back) c.BackColor = back;
         }
     }
 
@@ -2537,7 +2582,7 @@ public sealed partial class MainForm : Form
             _sendStringTimer.Stop();                       // 规格：先把 SendStringTimer 关掉
             var pairs = new List<(int Order, int Row)>(IniDocument.MultiRowCount);
             for (int k = 0; k < IniDocument.MultiRowCount; k++)
-                pairs.Add((ParseIntOr0(_rowOrder[k].Text), k));
+                pairs.Add((_rowOrder[k] is null ? 0 : ParseIntOr0(_rowOrder[k].Text), k));   // 未建页按 0 不发送
             _loopOrder.Clear();
             _loopOrder.AddRange(pairs.OrderBy(t => t.Order));   // 冒泡“大于才交换”= 稳定升序
             _planner.StartFlag = true;                     // 0x4ED64E = 1
@@ -2561,7 +2606,7 @@ public sealed partial class MainForm : Form
 
         var input = new List<(int Order, string Data, int Row)>(_loopOrder.Count);
         foreach (var (order, row) in _loopOrder)
-            input.Add((order, _rowData[row].Text, row));    // 顺序号用快照，数据实时读
+            input.Add((order, _rowData[row]?.Text ?? "", row));    // 顺序号用快照，数据实时读
 
         MultiSendPlanner.Step step = _planner.Tick(input);
         switch (step.Kind)
@@ -2572,10 +2617,12 @@ public sealed partial class MainForm : Form
             case MultiSendPlanner.Kind.None:
                 return;
             case MultiSendPlanner.Kind.Send:
-                int iv = int.TryParse(_rowTime[step.Row].Text.Trim(), out var p) ? p : 1000;
+                TextBox? stepData = _rowData[step.Row];
+                if (stepData is null) return;               // 该行所在页还没建，跳过
+                int iv = int.TryParse(_rowTime[step.Row]?.Text.Trim(), out var p) ? p : 1000;
                 _multiTimer.Interval = Fx.Clamp(iv, 1, 99999);   // 先改间隔（WinForms 间隔必须 ≥1）
 
-                SendPayload(_rowData[step.Row].Text, _rowHex[step.Row].Checked);   // 再发送该行
+                SendPayload(stepData.Text, _rowHex[step.Row].Checked);   // 再发送该行
 
                 for (int k = 0; k < _rowSend.Length; k++)
                 {
@@ -2949,23 +2996,67 @@ public sealed partial class MainForm : Form
         if (_prewarmQueue.Count == 0) _prewarmTimer.Stop();
     }
 
+    /// <summary>某一页的多条表格第一次用到时才建：99 行 × 6 个控件，三页提前建代价太大。</summary>
+    private void EnsureMultiPageBuilt(int page)
+    {
+        if (page < 0 || page >= IniDocument.MultiPageCount) return;
+        if (_multiPageHost is null || _multiPages[page] is not null) return;
+        MultiRowsPanel grid = BuildMultiGrid(page, _multiRowHeight, _multiHexCol, _multiOrderCol, _multiDelayCol, _multiSendCol);
+        _multiGrids[page] = grid;
+        var scroll = new BufferedPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            BackColor = Theme.Surface,
+            Visible = false,
+        };
+        scroll.Controls.Add(grid);
+        _multiPageHost.Controls.Add(scroll);
+        _multiPages[page] = scroll;
+        if (_multiRowSource is not null)
+        {
+            int origin = page * IniDocument.MultiRowsPerPage;
+            for (int i = origin; i < origin + IniDocument.MultiRowsPerPage; i++)
+                ApplyMultiRow(i, _multiRowSource);
+        }
+    }
+
     private void SelectMultiPage(int page)
     {
         if (_multiPageCount <= 0) return;
         _multiPage = Fx.Clamp(page, 0, _multiPageCount - 1);
-        for (int i = 0; i < IniDocument.MultiPageCount; i++)
+        EnsureMultiPageBuilt(_multiPage);       // 首次切到某页时才展开它的 99 行
+        Panel? host = _multiPageHost;
+        bool freeze = host is { IsHandleCreated: true };
+        if (freeze) SendMessage(host!.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+        host?.SuspendLayout();
+        try
         {
-            bool exists = i < _multiPageCount;
-            if (_multiTabs[i] is not null)
+            for (int i = 0; i < IniDocument.MultiPageCount; i++)
             {
-                _multiTabs[i].Visible = exists;
-                _multiTabs[i].Kind = i == _multiPage
-                    ? ThemeButton.ButtonKind.SegmentSelected
-                    : ThemeButton.ButtonKind.Segment;
-                _multiTabs[i].Invalidate();
+                bool exists = i < _multiPageCount;
+                if (_multiTabs[i] is not null)
+                {
+                    _multiTabs[i].Visible = exists;
+                    _multiTabs[i].Kind = i == _multiPage
+                        ? ThemeButton.ButtonKind.SegmentSelected
+                        : ThemeButton.ButtonKind.Segment;
+                    _multiTabs[i].Invalidate();
+                }
+                if (_multiCloseTabs[i] is not null) _multiCloseTabs[i]!.Visible = exists;
+                Panel? pagePanel = _multiPages[i];
+                bool want = exists && i == _multiPage;
+                if (pagePanel is not null && pagePanel.Visible != want) pagePanel.Visible = want;
             }
-            if (_multiCloseTabs[i] is not null) _multiCloseTabs[i]!.Visible = exists;
-            if (_multiPages[i] is not null) _multiPages[i].Visible = exists && i == _multiPage;
+        }
+        finally
+        {
+            host?.ResumeLayout(true);
+            if (freeze)
+            {
+                SendMessage(host!.Handle, WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+                host.Invalidate(true);
+            }
         }
         if (_multiAddTab is not null) _multiAddTab.Enabled = _multiPageCount < IniDocument.MultiPageCount;
         _multiPages[_multiPage]?.BringToFront();
@@ -3037,6 +3128,8 @@ public sealed partial class MainForm : Form
 
     private void CopyMultiPage(int fromPage, int toPage)
     {
+        EnsureMultiPageBuilt(fromPage);
+        EnsureMultiPageBuilt(toPage);
         int from = fromPage * IniDocument.MultiRowsPerPage;
         int to = toPage * IniDocument.MultiRowsPerPage;
         for (int k = 0; k < IniDocument.MultiRowsPerPage; k++)
@@ -3055,6 +3148,7 @@ public sealed partial class MainForm : Form
 
     private void ClearMultiPage(int page)
     {
+        EnsureMultiPageBuilt(page);
         int origin = page * IniDocument.MultiRowsPerPage;
         for (int k = 0; k < IniDocument.MultiRowsPerPage; k++)
         {
@@ -3075,10 +3169,26 @@ public sealed partial class MainForm : Form
     {
         if (_rowSend[row] is not ThemeButton button) return;
         int shown = row % IniDocument.MultiRowsPerPage + 1;
-        button.AccentText = _rowComments[row].Length > 0 && _rowComments[row] != shown.ToString();
+        string comment = _rowComments[row] ?? shown.ToString();
+        button.AccentText = comment.Length > 0 && comment != shown.ToString();
         if (button.Kind is ThemeButton.ButtonKind.Default or ThemeButton.ButtonKind.Outline)
             button.Kind = ThemeButton.ButtonKind.Soft;
         button.Invalidate();
+    }
+
+    /// <summary>把快照里的一行套到控件上；该行所在页还没建时直接跳过。</summary>
+    private void ApplyMultiRow(int row, IniSnapshot snap)
+    {
+        if (_rowOrder[row] is null) return;
+        _rowOrder[row].Text = snap.Order[row];
+        _rowComments[row] = snap.Comment[row];
+        int shown = row % IniDocument.MultiRowsPerPage + 1;
+        _rowSend[row].Text = snap.Comment[row].Length > 0 ? snap.Comment[row] : shown.ToString();
+        _rowTip.SetToolTip(_rowData[row], snap.Comment[row]);
+        _rowTime[row].Text = snap.Delay[row];
+        _rowHex[row].Checked = snap.Hex[row];
+        _rowData[row].Text = snap.Data[row];
+        StyleSendButton(row);
     }
 
     private void ClearMultiSendHighlight()
@@ -3209,10 +3319,18 @@ public sealed partial class MainForm : Form
         _txRateLabel.ForeColor = Theme.StatusSend;
         _bufferLabel.ForeColor = Theme.Muted;
         if (_recvBox.ContextMenuStrip is ContextMenuStrip logMenu) Theme.StyleContextMenu(logMenu);
-        RenderLogAll();
-        StatusTick();
-        UpdateStatus();
-        ApplyMultiTheme();
+        // 配色已经换好，先让窗口重画；日志就是 1M 字符，重画改为按块异步，点击立即有反馈。
+        if (IsHandleCreated && !IsDisposed)
+        {
+            BeginInvoke(new Action(() =>
+            {
+                if (IsDisposed) return;
+                RenderLogAll();
+                StatusTick();
+                UpdateStatus();
+                ApplyMultiTheme();
+            }));
+        }
     }
 
     /// <summary>下拉里可能带“COM38 · USB 串行设备”描述，逻辑和 ini 只用端口名。</summary>
@@ -3455,6 +3573,7 @@ public sealed partial class MainForm : Form
         _sendStringTimer.Stop();
         _multiTimer.Stop();
         _autoSaveTimer.Stop();
+        CloseRecvFile();                       // 先把接收文件 flush/关闭再存参数
         SaveConfig();
         try { _net.Disconnect(); } catch { /* 关闭时断开失败不影响退出 */ }
         try { _port.Close(); } catch { /* 同上 */ }
@@ -3593,11 +3712,22 @@ public sealed partial class MainForm : Form
         else snap.AscText = _sendBox.Text;
         for (int i = 0; i < IniDocument.MultiRowCount; i++)
         {
-            snap.Order[i] = _rowOrder[i].Text;
-            snap.Comment[i] = _rowComments[i];
-            snap.Delay[i] = _rowTime[i].Text;
-            snap.Hex[i] = _rowHex[i].Checked;
-            snap.Data[i] = _rowData[i].Text;
+            if (_rowOrder[i] is not null)
+            {
+                snap.Order[i] = _rowOrder[i].Text;
+                snap.Comment[i] = _rowComments[i];
+                snap.Delay[i] = _rowTime[i].Text;
+                snap.Hex[i] = _rowHex[i].Checked;
+                snap.Data[i] = _rowData[i].Text;
+                continue;
+            }
+            // 这一页还没建：沿用加载时的数据，隐藏页不会因为按需建页而丢内容。
+            int shown = i % IniDocument.MultiRowsPerPage + 1;
+            snap.Order[i] = _multiRowSource?.Order[i] ?? "0";
+            snap.Comment[i] = _multiRowSource?.Comment[i] ?? shown.ToString();
+            snap.Delay[i] = _multiRowSource?.Delay[i] ?? "1000";
+            snap.Hex[i] = _multiRowSource?.Hex[i] ?? false;
+            snap.Data[i] = _multiRowSource?.Data[i] ?? "";
         }
         return snap;
     }
@@ -3610,18 +3740,9 @@ public sealed partial class MainForm : Form
             if (Theme.IsLight != snap.ThemeLight)
                 ApplyTheme(snap.ThemeLight);
 
+            _multiRowSource = snap;
             for (int i = 0; i < IniDocument.MultiRowCount; i++)
-            {
-                _rowOrder[i].Text = snap.Order[i];
-                _rowComments[i] = snap.Comment[i];
-                int shown = i % IniDocument.MultiRowsPerPage + 1;
-                _rowSend[i].Text = snap.Comment[i].Length > 0 ? snap.Comment[i] : shown.ToString();
-                _rowTip.SetToolTip(_rowData[i], snap.Comment[i]);
-                _rowTime[i].Text = snap.Delay[i];
-                _rowHex[i].Checked = snap.Hex[i];
-                _rowData[i].Text = snap.Data[i];
-                StyleSendButton(i);
-            }
+                ApplyMultiRow(i, snap);             // 未建的页没有控件，等切到那一页再套数据
             _multiPageCount = Fx.Clamp(snap.MultiPageCount, 1, IniDocument.MultiPageCount);
             SelectMultiPage(0);
 
@@ -3806,6 +3927,7 @@ public sealed partial class MainForm : Form
         foreach (MultiRowsPanel grid in _multiGrids)
         {
             if (grid is null) continue;
+            if (grid.SendColumnWidth == width) continue;   // 窗口拉伸时列宽没变，不必重排 99 行
             grid.SendColumnWidth = width;
             grid.PerformLayout();
         }

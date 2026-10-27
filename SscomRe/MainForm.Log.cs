@@ -9,7 +9,17 @@ namespace SscomRe;
 public sealed partial class MainForm
 {
     private const int WM_SETREDRAW = 0x000B;
+    private const int RenderChunkChars = 64 * 1024;
     private bool _scrollLatestScheduled;
+
+    // 整屏重画按块异步进行：单块 RTF 插入只有几十毫秒，避免 1M 字符一次重建把界面冻住。
+    private int _renderToken;
+    private bool _renderBusy;
+    private string? _renderText;
+    private int _renderOffset;
+    private int _renderSelStart;
+    private int _renderSelLen;
+    private Point _renderScroll;
 
     private Color LogColorOf(LogFormatter.Kind kind) => kind switch
     {
@@ -26,6 +36,32 @@ public sealed partial class MainForm
         List<LogFormatter.Line> lines = LogFormatter.Parse(text, _hexDisplayBox.Checked);
         Color defaultColor = _recvBox.ForeColor;
         Color defaultBack = _recvBox.BackColor;
+
+        // 纯数据批次（无时间戳、收发标记、错误或 HEX 着色）不值得构造 RTF：
+        // AppendText 走 EM_REPLACESEL 纯文本路径，高频接收时省掉整段 RTF 解析。
+        bool plain = true;
+        foreach (LogFormatter.Line line in lines)
+        {
+            if (line.Tx || line.Error) { plain = false; break; }
+            foreach (LogFormatter.Span span in line.Spans)
+            {
+                if (span.Kind is not (LogFormatter.Kind.Data or LogFormatter.Kind.Newline))
+                {
+                    plain = false;
+                    break;
+                }
+            }
+            if (!plain) break;
+        }
+        if (plain)
+        {
+            _recvBox.AppendText(text);
+            _recvBox.SelectionStart = _recvBox.TextLength;
+            _recvBox.SelectionLength = 0;
+            _recvBox.SelectionColor = defaultColor;
+            _recvBox.SelectionBackColor = defaultBack;
+            return;
+        }
         var colors = new List<Color>();
         int ColorIndex(Color c)
         {
@@ -112,6 +148,10 @@ public sealed partial class MainForm
         }
     }
 
+    /// <summary>
+    /// 整屏重画：清空后按 64K 字符一块、每块一次 BeginInvoke 追加。
+    /// 单块 RTF 插入只有几十毫秒，既保留分色又不会像一次插入 1M 字符那样把界面冻住。
+    /// </summary>
     private void RenderLogFromText(string text)
     {
         if (!_recvBox.IsHandleCreated)
@@ -119,22 +159,76 @@ public sealed partial class MainForm
             _recvBox.Text = text;
             return;
         }
-        int selStart = _recvBox.SelectionStart;
-        int selLen = _recvBox.SelectionLength;
-        Point scroll = GetRecvScroll();
+        _renderSelStart = _recvBox.SelectionStart;
+        _renderSelLen = _recvBox.SelectionLength;
+        _renderScroll = GetRecvScroll();
         ClearSearchHighlight();
 
+        CancelRenderLog();                     // 先结束上一轮未完成的重画，恢复重绘
+        int token = _renderToken;
+        _renderText = text;
+        _renderOffset = 0;
+
         SendMessage(_recvBox.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+        _recvBox.Clear();
+        if (string.IsNullOrEmpty(text))
+        {
+            FinishRenderLog();
+            return;
+        }
+        _renderBusy = true;
+        BeginInvoke(new Action(() => RenderLogChunk(token)));
+    }
+
+    private void RenderLogChunk(int token)
+    {
+        if (token != _renderToken || IsDisposed || !_recvBox.IsHandleCreated) return;
+        string? text = _renderText;
+        if (text is null)
+        {
+            FinishRenderLog();
+            return;
+        }
+        int end = NextRenderChunkEnd(text, _renderOffset);
+        string chunk = text.Substring(_renderOffset, end - _renderOffset);
+        _renderOffset = end;
         try
         {
-            _recvBox.Clear();
-            if (!string.IsNullOrEmpty(text)) AppendFormatted(text);
+            AppendFormatted(chunk);
         }
-        finally
+        catch
+        {
+            CancelRenderLog();
+            throw;
+        }
+        if (_renderOffset < text.Length)
+            BeginInvoke(new Action(() => RenderLogChunk(token)));
+        else
+            FinishRenderLog();
+    }
+
+    /// <summary>优先在换行处切块；单行过长（HEX 连续输出）时按字符数切，代理对不劈开。</summary>
+    private static int NextRenderChunkEnd(string text, int start)
+    {
+        int limit = Math.Min(text.Length, start + RenderChunkChars);
+        if (limit >= text.Length) return text.Length;
+        int cut = text.LastIndexOf('\n', limit - 1, limit - start);
+        if (cut >= start) return cut + 1;
+        if (char.IsHighSurrogate(text[limit - 1]) && limit < text.Length) limit++;
+        return limit;
+    }
+
+    private void FinishRenderLog()
+    {
+        _renderText = null;
+        _renderOffset = 0;
+        _renderBusy = false;
+        if (_recvBox.IsHandleCreated && !IsDisposed)
         {
             SendMessage(_recvBox.Handle, WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
             _recvBox.Invalidate();
         }
+        if (IsDisposed || !IsHandleCreated) return;
 
         if (_autoScrollBox.Checked)
         {
@@ -142,11 +236,29 @@ public sealed partial class MainForm
         }
         else
         {
-            int start = Math.Min(selStart, _recvBox.TextLength);
-            int len = Math.Min(selLen, Math.Max(0, _recvBox.TextLength - start));
+            int start = Math.Min(_renderSelStart, _recvBox.TextLength);
+            int len = Math.Min(_renderSelLen, Math.Max(0, _recvBox.TextLength - start));
             _recvBox.Select(start, len);
-            SetRecvScroll(scroll);
+            SetRecvScroll(_renderScroll);
         }
+        // 重画期间接收线程可能积压了新数据，画完继续排一次刷新。
+        bool pending;
+        lock (_displayLock)
+            pending = _pendingDisplay.Length > 0 || _pendingReplace is not null;
+        if (pending) StartDisplayFlush();
+    }
+
+    /// <summary>取消未完成的整屏重画并恢复重绘；清屏/切换前调用。</summary>
+    private void CancelRenderLog()
+    {
+        _renderToken++;
+        _renderText = null;
+        _renderOffset = 0;
+        if (!_renderBusy) return;
+        _renderBusy = false;
+        if (IsDisposed || !_recvBox.IsHandleCreated) return;
+        SendMessage(_recvBox.Handle, WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+        _recvBox.Invalidate();
     }
 
     private void ScrollRecvToLatest()

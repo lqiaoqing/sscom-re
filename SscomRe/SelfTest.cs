@@ -805,7 +805,7 @@ internal static class SelfTest
                     if (c is TextBox tb && tb.Tag is Point cell && cell.Y == 1) dataBoxes++;
                 }
                 CheckText("默认只显示一个页签", visibleTabs.ToString(), "1");
-                CheckText("多条结构仍为297行", dataBoxes.ToString(), "297");
+                CheckText("默认只建当前页99行", dataBoxes.ToString(), "99");
 
                 form.AddMultiPageForTest();
                 CheckText("增加到两页", form.MultiPageCountForTest.ToString(), "2");
@@ -817,6 +817,10 @@ internal static class SelfTest
                 form.AddMultiPageForTest();
                 CheckText("增加到三页", form.MultiPageCountForTest.ToString(), "3");
                 form.SetMultiPageDataForTest(2, 0, "第三页");
+                int builtRows = 0;
+                foreach (var c in AllControls(form))
+                    if (c is TextBox builtBox && builtBox.Tag is Point builtCell && builtCell.Y == 1) builtRows++;
+                CheckText("三页按需建齐297行", builtRows.ToString(), "297");
                 form.AddMultiPageForTest();
                 CheckText("不能超过三页", form.MultiPageCountForTest.ToString(), "3");
 

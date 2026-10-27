@@ -10,7 +10,16 @@ static class Program
     {
         if (args.Contains("--selftest"))
         {
-            Environment.Exit(SelfTest.Run());
+            try
+            {
+                Environment.Exit(SelfTest.Run());
+            }
+            catch (Exception ex)
+            {
+                // 自检里的未处理异常要能落到 stderr，避免只看到退出码。
+                Console.Error.WriteLine(ex);
+                Environment.Exit(2);
+            }
             return;
         }
         if (args.Contains("--bench-log"))
