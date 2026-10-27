@@ -242,6 +242,131 @@ public sealed partial class MainForm
         };
     }
 
+    private void BuildCommandPalette()
+    {
+        _commandPalette = new CommandPalette { Font = Font, Visible = false };
+        _commandPalette.Activate += item => ExecutePaletteItem(item, fillOnly: false);
+        _commandPalette.FillRequested += item => ExecutePaletteItem(item, fillOnly: true);
+        _commandPalette.Dismissed += CloseCommandPalette;
+        Controls.Add(_commandPalette);
+        _commandPalette.BringToFront();
+        _commandPaletteFilter = new CommandPaletteDismissFilter(this);
+        Application.AddMessageFilter(_commandPaletteFilter);
+        FormClosed += (_, _) =>
+        {
+            if (_commandPaletteFilter is null) return;
+            Application.RemoveMessageFilter(_commandPaletteFilter);
+            _commandPaletteFilter = null;
+        };
+    }
+
+    private void ToggleCommandPalette()
+    {
+        if (_commandPalette is null) return;
+        if (_commandPalette.Visible)
+        {
+            CloseCommandPalette();
+            return;
+        }
+        CloseFlyout();
+        ClosePortPopup(false);
+        HideToast();
+        List<CommandPaletteItem> items = BuildCommandItems();
+        _commandPaletteReturnFocus = ActiveControl;
+        _commandPalette.RefreshTheme();
+        _commandPalette.SetItems(items);
+        int margin = Theme.Scale(this, 12);
+        int width = Math.Min(Theme.Scale(this, 640), Math.Max(320, ClientSize.Width - margin * 2));
+        int height = Math.Min(Theme.Scale(this, 520), Math.Max(280, ClientSize.Height - Theme.Scale(this, 80)));
+        int x = Math.Max(margin, (ClientSize.Width - width) / 2);
+        int y = Math.Max(Theme.Scale(this, 60), (ClientSize.Height - height) / 3);
+        _commandPalette.Bounds = new Rectangle(x, y, width, height);
+        _commandPalette.Visible = true;
+        _commandPalette.BringToFront();
+        _commandPalette.FocusSearch();
+    }
+
+    private void CloseCommandPalette()
+    {
+        if (_commandPalette is null || !_commandPalette.Visible) return;
+        _commandPalette.Visible = false;
+        Control? back = _commandPaletteReturnFocus;
+        _commandPaletteReturnFocus = null;
+        if (back is { CanFocus: true } && !back.IsDisposed) back.Focus();
+    }
+
+    private List<CommandPaletteItem> BuildCommandItems()
+    {
+        var items = new List<CommandPaletteItem>();
+        var seen = new HashSet<int>();
+
+        void AddRow(int row, string section)
+        {
+            if (row < 0 || row >= IniDocument.MultiRowCount || !seen.Add(row)) return;
+            string data = _rowData[row]?.Text ?? _multiRowSource?.Data[row] ?? "";
+            if (string.IsNullOrEmpty(data)) return;
+            bool hex = _rowHex[row]?.Checked ?? _multiRowSource?.Hex[row] ?? false;
+            string comment = _rowComments[row] ?? _multiRowSource?.Comment[row] ?? "";
+            int page = row / IniDocument.MultiRowsPerPage;
+            int local = row % IniDocument.MultiRowsPerPage + 1;
+            bool custom = comment.Length > 0 && comment != local.ToString();
+            string title = custom ? comment : data;
+            string subtitle = custom ? data : "";
+            items.Add(new CommandPaletteItem(section, $"P{page + 1} · {local}", title, subtitle, data, hex, row));
+        }
+
+        void AddPage(int page, string section)
+        {
+            int origin = page * IniDocument.MultiRowsPerPage;
+            for (int k = 0; k < IniDocument.MultiRowsPerPage; k++)
+                AddRow(origin + k, section);
+        }
+
+        AddPage(_multiPage, $"当前页 · 第 {_multiPage + 1} 页");
+        foreach (int row in _recentCommands)
+            AddRow(row, "最近发送");
+        for (int page = 0; page < _multiPageCount; page++)
+            if (page != _multiPage)
+                AddPage(page, $"第 {page + 1} 页");
+        return items;
+    }
+
+    private void ExecutePaletteItem(CommandPaletteItem item, bool fillOnly)
+    {
+        if (fillOnly)
+        {
+            if (_hexSendBox.Checked != item.Hex) _hexSendBox.Checked = item.Hex;
+            _sendBox.Text = item.Data;
+            CloseCommandPalette();
+            _sendBox.Focus();
+            return;
+        }
+        if (!ChannelCanSend())
+        {
+            ShowToast("串口未打开或网络未连接");
+            return;
+        }
+        SendPayload(item.Data, item.Hex);
+        RememberRecentCommand(item.Row);
+        CloseCommandPalette();
+        ShowToast("已发送 " + item.Badge);
+    }
+
+    private void RememberRecentCommand(int row)
+    {
+        if (row < 0 || row >= IniDocument.MultiRowCount) return;
+        _recentCommands.Remove(row);
+        _recentCommands.Insert(0, row);
+        while (_recentCommands.Count > 12) _recentCommands.RemoveAt(_recentCommands.Count - 1);
+    }
+
+    internal bool CommandPaletteVisibleForTest => _commandPalette?.Visible == true;
+    internal int CommandPaletteItemCountForTest => _commandPalette?.ItemCount ?? -1;
+    internal int CommandPaletteFilteredCountForTest => _commandPalette?.FilteredItemCount ?? -1;
+    internal void SetCommandPaletteQueryForTest(string query) => _commandPalette?.SetQueryForTest(query);
+    internal void OpenCommandPaletteForTest() => ToggleCommandPalette();
+    internal void CloseCommandPaletteForTest() => CloseCommandPalette();
+
     private void TogglePortPopup(Control anchor)
     {
         if (_portPopup is null) return;
@@ -251,6 +376,7 @@ public sealed partial class MainForm
             return;
         }
         CloseFlyout();
+        CloseCommandPalette();
         _portPopupAnchor = anchor;
         _portPopup.Width = Math.Max(Theme.Scale(this, 250), anchor.Width);
         string[] items = _portCombo.Items.Cast<object?>()
@@ -1225,6 +1351,16 @@ public sealed partial class MainForm
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
+        if (keyData == (Keys.Control | Keys.K))
+        {
+            ToggleCommandPalette();
+            return true;
+        }
+        if (keyData == Keys.Escape && _commandPalette is { Visible: true })
+        {
+            CloseCommandPalette();
+            return true;
+        }
         if (keyData == Keys.Escape && _portPopup is { Visible: true })
         {
             ClosePortPopup(true);
@@ -1247,8 +1383,44 @@ public sealed partial class MainForm
         {
             CloseFlyout();
             ClosePortPopup(false);
+            CloseCommandPalette();
         }
         base.WndProc(ref m);
+    }
+
+    private sealed class CommandPaletteDismissFilter : IMessageFilter
+    {
+        private const int WM_LBUTTONDOWN = 0x0201;
+        private const int WM_RBUTTONDOWN = 0x0204;
+        private const int WM_MBUTTONDOWN = 0x0207;
+        private const int WM_NCLBUTTONDOWN = 0x00A1;
+        private const int WM_NCRBUTTONDOWN = 0x00A4;
+        private const uint GA_ROOT = 2;
+
+        private readonly MainForm _form;
+
+        public CommandPaletteDismissFilter(MainForm form) => _form = form;
+
+        public bool PreFilterMessage(ref Message m)
+        {
+            CommandPalette? palette = _form._commandPalette;
+            if (palette is null || !palette.Visible) return false;
+            if (m.Msg is not (WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN or
+                WM_NCLBUTTONDOWN or WM_NCRBUTTONDOWN)) return false;
+
+            Control? control = Control.FromHandle(m.HWnd);
+            if (control is not null)
+            {
+                if (ReferenceEquals(control, palette) || palette.Contains(control)) return false;
+                if (ReferenceEquals(control.TopLevelControl, _form)) _form.CloseCommandPalette();
+                return false;
+            }
+            if (GetAncestor(m.HWnd, GA_ROOT) == _form.Handle) _form.CloseCommandPalette();
+            return false;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     }
 
     private sealed class PortPopupDismissFilter : IMessageFilter

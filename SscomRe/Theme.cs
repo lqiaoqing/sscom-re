@@ -47,7 +47,6 @@ internal static class Theme
         StatusMid = Color.FromArgb(66, 50, 34),
         StatusLow = Color.FromArgb(54, 48, 34),
         TxWash = Hex("#17140F"),
-        ErrorWash = Hex("#1A1111"),
         SearchHighlight = Hex("#365E58"),
         WarmFillAlpha = 20,
         WarmBorderAlpha = 44,
@@ -88,7 +87,6 @@ internal static class Theme
         StatusMid = Hex("#FAEBD9"),
         StatusLow = Hex("#FCF3E4"),
         TxWash = Hex("#FCF6E9"),
-        ErrorWash = Hex("#FBEDED"),
         SearchHighlight = Hex("#C9E7E2"),
         WarmFillAlpha = 30,
         WarmBorderAlpha = 70,
@@ -130,7 +128,6 @@ internal static class Theme
     public static int WarmBorderAlpha => Current.WarmBorderAlpha;
 
     public static Color TxWash => Current.TxWash;
-    public static Color ErrorWash => Current.ErrorWash;
     public static Color SearchHighlight => Current.SearchHighlight;
 
     public static Color StatusBackground(long count) => count switch
@@ -377,7 +374,6 @@ internal static class Theme
         if (color == old.StatusMid) return now.StatusMid;
         if (color == old.StatusLow) return now.StatusLow;
         if (color == old.TxWash) return now.TxWash;
-        if (color == old.ErrorWash) return now.ErrorWash;
         if (color == old.SearchHighlight) return now.SearchHighlight;
         return color;
     }
@@ -551,7 +547,7 @@ internal sealed class ThemePalette
     public Color Text, Muted, Dim, Accent, AccentBright, AccentDeep, AccentInk;
     public Color Amber, AmberInk, AmberText, StatusSend, CheckFill, CheckBorder, CheckActiveBorder, Danger, Green, VerifyField;
     public Color StatusCritical, StatusHigh, StatusMid, StatusLow;
-    public Color TxWash, ErrorWash, SearchHighlight;
+    public Color TxWash, SearchHighlight;
     public int WarmFillAlpha, WarmBorderAlpha;
 }
 

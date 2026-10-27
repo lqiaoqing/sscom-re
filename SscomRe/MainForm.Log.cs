@@ -21,28 +21,21 @@ public sealed partial class MainForm
     private int _renderSelLen;
     private Point _renderScroll;
 
-    private Color LogColorOf(LogFormatter.Kind kind) => kind switch
-    {
-        LogFormatter.Kind.Timestamp => Theme.Dim,
-        LogFormatter.Kind.Rx => Theme.Accent,
-        LogFormatter.Kind.Tx => Theme.StatusSend,
-        LogFormatter.Kind.Error => Theme.Danger,
-        LogFormatter.Kind.Hex => Theme.Accent,
-        _ => _recvBox.ForeColor,
-    };
-
     private void AppendFormatted(string text)
     {
         List<LogFormatter.Line> lines = LogFormatter.Parse(text, _hexDisplayBox.Checked);
         Color defaultColor = _recvBox.ForeColor;
         Color defaultBack = _recvBox.BackColor;
+        var palette = new LogHighlightPalette(
+            defaultColor, defaultBack, Theme.Dim, Theme.Accent, Theme.StatusSend,
+            Theme.Accent, Theme.TxWash);
 
-        // 纯数据批次（无时间戳、收发标记、错误或 HEX 着色）不值得构造 RTF：
+        // 纯数据批次（无时间戳、收发标记、HEX 着色）不值得构造 RTF：
         // AppendText 走 EM_REPLACESEL 纯文本路径，高频接收时省掉整段 RTF 解析。
         bool plain = true;
         foreach (LogFormatter.Line line in lines)
         {
-            if (line.Tx || line.Error) { plain = false; break; }
+            if (line.Tx) { plain = false; break; }
             foreach (LogFormatter.Span span in line.Spans)
             {
                 if (span.Kind is not (LogFormatter.Kind.Data or LogFormatter.Kind.Newline))
@@ -53,13 +46,24 @@ public sealed partial class MainForm
             }
             if (!plain) break;
         }
-        if (plain)
+        // 规则启用时先做一次整批预筛；常见纯数据无命中就不必逐行跑规则。
+        if (plain && !_logHighlighter.HasAnyMatch(text))
         {
-            _recvBox.AppendText(text);
-            _recvBox.SelectionStart = _recvBox.TextLength;
-            _recvBox.SelectionLength = 0;
-            _recvBox.SelectionColor = defaultColor;
-            _recvBox.SelectionBackColor = defaultBack;
+            AppendPlainBatch(text, defaultColor, defaultBack);
+            return;
+        }
+
+        var styledLines = new List<StyledLogLine>(lines.Count);
+        bool anyHighlight = false;
+        foreach (LogFormatter.Line line in lines)
+        {
+            StyledLogLine styled = _logHighlighter.Style(line, palette);
+            styledLines.Add(styled);
+            if (styled.Matched) anyHighlight = true;
+        }
+        if (plain && !anyHighlight)
+        {
+            AppendPlainBatch(text, defaultColor, defaultBack);
             return;
         }
         var colors = new List<Color>();
@@ -73,13 +77,11 @@ public sealed partial class MainForm
 
         int defaultCf = ColorIndex(defaultColor);
         int defaultHl = ColorIndex(defaultBack);
-        int txHl = ColorIndex(Theme.TxWash);
-        int errorHl = ColorIndex(Theme.ErrorWash);
 
         // 一次构造整批 RTF，再用 SelectedRtf 单次插入；逐段 SelectionColor/AppendText 在长日志上是 O(n²)。
         var body = new StringBuilder(Math.Max(64, text.Length * 2));
         bool first = true;
-        foreach (LogFormatter.Line line in lines)
+        foreach (StyledLogLine line in styledLines)
         {
             if (!first)
             {
@@ -88,15 +90,11 @@ public sealed partial class MainForm
             }
             first = false;
 
-            int back = line.Error ? errorHl : line.Tx ? txHl : defaultHl;
-            foreach (LogFormatter.Span span in line.Spans)
+            foreach (StyledLogRun run in line.Runs)
             {
-                Color color = LogColorOf(span.Kind);
-                if (line.Tx && span.Kind == LogFormatter.Kind.Data)
-                    color = Theme.StatusSend;
-                body.Append(@"{\cf").Append(ColorIndex(color))
-                    .Append(@"\highlight").Append(back).Append(' ');
-                AppendRtfText(body, span.Text);
+                body.Append(@"{\cf").Append(ColorIndex(run.Fore))
+                    .Append(@"\highlight").Append(ColorIndex(run.Back)).Append(' ');
+                AppendRtfText(body, run.Text);
                 body.Append('}');
             }
         }
@@ -123,6 +121,15 @@ public sealed partial class MainForm
         _recvBox.SelectionLength = 0;
         _recvBox.SelectionColor = defaultColor;
         _recvBox.SelectionBackColor = defaultBack;
+    }
+
+    private void AppendPlainBatch(string text, Color fore, Color back)
+    {
+        _recvBox.AppendText(text);
+        _recvBox.SelectionStart = _recvBox.TextLength;
+        _recvBox.SelectionLength = 0;
+        _recvBox.SelectionColor = fore;
+        _recvBox.SelectionBackColor = back;
     }
 
     private static string RtfFontName(string name) =>
@@ -485,6 +492,12 @@ public sealed partial class MainForm
     internal bool RecvAtBottomForTest() => RecvAtBottom();
     internal void AppendLogForTest(string text) => AppendRecv(text);
     internal void RenderLogForTest(string text) => RenderLogFromText(text);
+    internal void SetHighlightRulesForTest(IEnumerable<LogHighlightRule> rules)
+    {
+        _highlightRules.Clear();
+        foreach (LogHighlightRule rule in rules) _highlightRules.Add(rule);
+        _logHighlighter.SetRules(_highlightRules);
+    }
     internal bool RenderLogBusyForTest => _renderBusy;
     internal void CompletePendingRenderLogForTest() => CompletePendingRenderLog();
     internal bool AutoScrollEnabledForTest => _autoScrollBox?.Checked == true;

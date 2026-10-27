@@ -121,6 +121,12 @@ public sealed partial class MainForm : Form
     private readonly TextBox[] _rowTime = new TextBox[IniDocument.MultiRowCount];
     private readonly string[] _rowComments = new string[IniDocument.MultiRowCount];
     private readonly ToolTip _rowTip = new();
+    private readonly LogHighlighter _logHighlighter = new();
+    private readonly List<LogHighlightRule> _highlightRules = new();
+    private CommandPalette _commandPalette = null!;
+    private CommandPaletteDismissFilter? _commandPaletteFilter;
+    private readonly List<int> _recentCommands = new();
+    private Control? _commandPaletteReturnFocus;
     private readonly MultiRowsPanel[] _multiGrids = new MultiRowsPanel[IniDocument.MultiPageCount];
     private readonly Panel[] _multiPages = new Panel[IniDocument.MultiPageCount];
     private readonly ThemeButton[] _multiTabs = new ThemeButton[IniDocument.MultiPageCount];
@@ -297,6 +303,7 @@ public sealed partial class MainForm : Form
             HideToast();
             CloseFlyout();
             ClosePortPopup(false);
+            CloseCommandPalette();
             ScheduleResponsiveRelayout();
             ScheduleScrollRecvToLatest();
         };
@@ -307,15 +314,17 @@ public sealed partial class MainForm : Form
             HideToast();
             CloseFlyout();
             ClosePortPopup(false);
+            CloseCommandPalette();
             ScheduleScrollRecvToLatest();
         };
-        menu.MenuActivate += (_, _) => { CloseFlyout(); ClosePortPopup(false); };
+        menu.MenuActivate += (_, _) => { CloseFlyout(); ClosePortPopup(false); CloseCommandPalette(); };
 
         Controls.Add(root);
         Controls.Add(menu);
         MainMenuStrip = menu;
         BuildSettingsFlyouts();
         BuildPortPopup();
+        BuildCommandPalette();
         BuildToast();
         ResumeLayout();
     }
@@ -327,7 +336,7 @@ public sealed partial class MainForm : Form
         get
         {
             Version? version = typeof(MainForm).Assembly.GetName().Version;
-            return version is null ? "1.2.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+            return version is null ? "1.3.0" : $"{version.Major}.{version.Minor}.{version.Build}";
         }
     }
 
@@ -461,6 +470,7 @@ public sealed partial class MainForm : Form
         var display = new ToolStripMenuItem("显示");
         display.DropDownItems.Add(new ToolStripMenuItem("字体/颜色/大小/...", null, (_, _) => PickRecvFont()));
         display.DropDownItems.Add(new ToolStripMenuItem("背景颜色", null, (_, _) => PickRecvBackColor()));
+        display.DropDownItems.Add(new ToolStripMenuItem("日志高亮规则...", null, (_, _) => ShowHighlightRules()));
         _lightThemeItem = new ToolStripMenuItem("浅色主题")
         {
             CheckOnClick = true,
@@ -531,6 +541,10 @@ public sealed partial class MainForm : Form
         };
         term.DropDownItems.AddRange(new ToolStripItem[] { _termEnterItem, _termKeyItem, _termEchoItem, _termAddLfItem });
         send.DropDownItems.Add(term);
+        send.DropDownItems.Add(new ToolStripMenuItem("命令面板", null, (_, _) => ToggleCommandPalette())
+        {
+            ShortcutKeyDisplayString = "Ctrl+K",
+        });
 
         var multi = new ToolStripMenuItem("多条字符串", null, (_, _) => ToggleMultiPanel());
         var help = new ToolStripMenuItem("帮助");
@@ -577,6 +591,9 @@ public sealed partial class MainForm : Form
         Put(panel, _sendFileButton);
         Put(panel, ActionButton("停止", StopSendFile));
         Put(panel, ActionButton("清发送区", () => _sendBox.Clear()));
+        var commandPaletteButton = ActionButton("命令面板", ToggleCommandPalette);
+        _rowTip.SetToolTip(commandPaletteButton, "搜索并发送已保存命令（Ctrl+K）");
+        Put(panel, commandPaletteButton);
         _topmostBox = new ThemeCheckBox { Text = "最前", AutoSize = true };
         Put(panel, _topmostBox);
         Put(panel, ActionButton("保存参数", SaveConfig));
@@ -2542,6 +2559,7 @@ public sealed partial class MainForm : Form
         string data = _rowData[row].Text;
         if (data.Length == 0) return;
         SendPayload(data, _rowHex[row].Checked);
+        RememberRecentCommand(row);
     }
 
     /// <summary>双击数据框输入注释（标题=行号）；确定后写入提示与行按钮标题并自动保存。</summary>
@@ -3306,6 +3324,7 @@ public sealed partial class MainForm : Form
     /// <summary>切换深/浅主题；不自动保存，调用方决定（菜单点击会 AutoSave，启动/导入不保存）。</summary>
     private void ApplyTheme(bool light)
     {
+        CloseCommandPalette();
         if (_lightThemeItem is not null) _lightThemeItem.Checked = light;
         Theme.ApplyTheme(this, light);
 
@@ -3566,6 +3585,20 @@ public sealed partial class MainForm : Form
         AutoSave();
     }
 
+    private void ShowHighlightRules()
+    {
+        string recentLog = _recvBox.Text;
+        if (recentLog.Length > 12000) recentLog = recentLog.Substring(recentLog.Length - 12000);
+        List<LogHighlightRule>? next = HighlightRulesDialog.Show(
+            this, _highlightRules, Theme.IsLight, recentLog);
+        if (next is null) return;
+        _highlightRules.Clear();
+        _highlightRules.AddRange(next);
+        _logHighlighter.SetRules(_highlightRules);
+        RenderLogBuffer();
+        AutoSave();
+    }
+
     private void RememberSendText()
     {
         if (_loading) return;
@@ -3699,6 +3732,7 @@ public sealed partial class MainForm : Form
             TimerInterval = _timerIntervalEdit.Text,
             AddCrLf = _newLineBox.Checked,
             AutoScroll = _autoScrollBox.Checked,
+            HighlightRulesJson = LogHighlightRuleStore.ToJson(_highlightRules),
             HexDisplay = _hexDisplayBox.Checked,
             VerifyMode = Math.Max(0, _verifyBox.SelectedIndex),
             Dtr = _dtrBox.Checked,
@@ -3777,6 +3811,20 @@ public sealed partial class MainForm : Form
                 ApplyMultiRow(i, snap);             // 未建的页没有控件，等切到那一页再套数据
             _multiPageCount = Fx.Clamp(snap.MultiPageCount, 1, IniDocument.MultiPageCount);
             SelectMultiPage(0);
+            List<LogHighlightRule> rules;
+            if (string.IsNullOrWhiteSpace(snap.HighlightRulesJson))
+            {
+                rules = LogHighlightRuleStore.CreateDefaults(Theme.IsLight);
+            }
+            else
+            {
+                List<LogHighlightRule> stored = LogHighlightRuleStore.FromJson(
+                    snap.HighlightRulesJson, out int rulesVersion);
+                rules = LogHighlightRuleStore.Upgrade(stored, Theme.IsLight, rulesVersion);
+            }
+            _highlightRules.Clear();
+            _highlightRules.AddRange(rules);
+            _logHighlighter.SetRules(_highlightRules);
 
             _sendFileDelay = snap.SendFileDelayMs;
             foreach (var it in _sendFileItems)

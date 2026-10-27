@@ -96,6 +96,9 @@ public static class IniDocument
         Setting(sb, "连接栏折叠(0=展开,1=折叠)", 1093, snap.SideCollapsed ? "1" : "0");
         Setting(sb, "多条字符串页数(1-3)", 1094, snap.MultiPageCount.ToString(CultureInfo.InvariantCulture));
         Setting(sb, "自动滚动到最新(0=否,1=是)", 1095, Bit(snap.AutoScroll));
+        string rulesJson = snap.HighlightRulesJson;
+        Setting(sb, "日志高亮规则(base64 JSON)", 1096,
+            rulesJson.Length == 0 ? "" : Convert.ToBase64String(Encoding.UTF8.GetBytes(rulesJson)));
         Setting(sb, "C:Chinese汉语, E:English", 1100, "C");
         sb.Append(";end\r\n");
         return sb.ToString();
@@ -291,6 +294,18 @@ public static class IniDocument
             case 1093: snap.SideCollapsed = IsOn(value); break;
             case 1094: snap.MultiPageCount = Fx.Clamp(ParseInt(value, 1), 1, MultiPageCount); break;
             case 1095: snap.AutoScroll = IsOn(value); break;
+            case 1096:
+                try
+                {
+                    snap.HighlightRulesJson = value.Length == 0
+                        ? ""
+                        : Encoding.UTF8.GetString(Convert.FromBase64String(value));
+                }
+                catch
+                {
+                    snap.HighlightRulesJson = "";
+                }
+                break;
             case 1100:
                 snap.Language = value;
                 break;
@@ -388,5 +403,7 @@ public sealed class IniSnapshot
     public int MultiPageCount { get; set; } = 1;
     /// <summary>N1095：接收日志是否自动滚动到最新；重写版新增键，缺省开启。</summary>
     public bool AutoScroll { get; set; } = true;
+    /// <summary>N1096：日志高亮规则 JSON；ini 内以 UTF-8 Base64 存放。</summary>
+    public string HighlightRulesJson { get; set; } = "";
     public string Language { get; set; } = "C";
 }

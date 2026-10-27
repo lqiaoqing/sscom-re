@@ -10,7 +10,6 @@ public static class LogFormatter
         Timestamp,
         Rx,
         Tx,
-        Error,
         Data,
         Hex,
         Newline,
@@ -20,25 +19,19 @@ public static class LogFormatter
 
     public sealed class Line
     {
-        public Line(List<Span> spans, bool tx, bool error)
+        public Line(List<Span> spans, bool tx)
         {
             Spans = spans;
             Tx = tx;
-            Error = error;
         }
 
         public List<Span> Spans { get; }
         public bool Tx { get; }
-        public bool Error { get; }
     }
 
     private static readonly Regex Head = new(
         @"^\[(\d{2}:\d{2}:\d{2}\.\d{3})\](收←◆|发→◇|IN←◆|OUT→◇)?(.*)$",
         RegexOptions.Compiled);
-
-    private static readonly Regex ErrorPattern = new(
-        @"(\bERR\b|error|错误|失败|校验失败|checksum|timeout|超时)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public static List<Line> Parse(string text, bool hexMode)
     {
@@ -68,10 +61,9 @@ public static class LogFormatter
                 data = line;
             }
 
-            bool error = ErrorPattern.IsMatch(line);
             if (data.Length > 0)
-                spans.Add(new Span(data, error ? Kind.Error : hexMode ? Kind.Hex : Kind.Data));
-            result.Add(new Line(spans, tx, error));
+                spans.Add(new Span(data, hexMode ? Kind.Hex : Kind.Data));
+            result.Add(new Line(spans, tx));
         }
         return result;
     }

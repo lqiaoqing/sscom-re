@@ -12,11 +12,15 @@
     <AssemblyTitle>串口/网络数据调试器(定制版)</AssemblyTitle>
     <Product>串口/网络数据调试器(定制版)</Product>
     <Description>串口/网络数据调试器(定制版)，依据 sscom5.13.1 行为规格的 C# WinForms 实现</Description>
-    <Version>1.2.0</Version>
-    <AssemblyVersion>1.2.0.0</AssemblyVersion>
-    <FileVersion>1.2.0.0</FileVersion>
+    <Version>1.3.0</Version>
+    <AssemblyVersion>1.3.0.0</AssemblyVersion>
+    <FileVersion>1.3.0.0</FileVersion>
     <AssemblyName>sscomRe_v$(Version)</AssemblyName>
     <ApplicationIcon>Assets\sscomRe.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
 
 </Project>

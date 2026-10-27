@@ -47,7 +47,8 @@ internal static class SelfTest
         CheckText("日志行数", logLines.Count.ToString(), "3");
         CheckText("日志 RX 片段", $"{logLines[0].Spans[0].Kind},{logLines[0].Spans[1].Kind}", "Timestamp,Rx");
         CheckText("日志 TX 行", logLines[1].Tx ? "yes" : "no", "yes");
-        CheckText("日志错误行", logLines[2].Error ? "yes" : "no", "yes");
+        CheckText("日志错误行归为数据",
+            logLines[2].Spans[logLines[2].Spans.Count - 1].Kind.ToString(), "Data");
         CheckText("日志去元数据", LogFormatter.StripMeta("[22:31:05.128]收←◆AT\nOK"), "AT\nOK");
         CheckText("日志 HEX 片段", LogFormatter.Parse("D6 D0", true)[0].Spans[0].Kind.ToString(), "Hex");
 
@@ -485,6 +486,7 @@ internal static class SelfTest
             snap.SideCollapsed = true;
             snap.MultiPageCount = 2;
             snap.AutoScroll = false;
+            snap.HighlightRulesJson = "{\"v\":1}";
 
             string t1 = IniDocument.Save(snap);
             CheckText("ini 含HEX注释", t1.Contains(IniDocument.CommentHex) ? "yes" : "no", "yes");
@@ -505,6 +507,7 @@ internal static class SelfTest
             CheckText("ini 写连接栏折叠", t1.Contains("N1093=,1\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写多条页数", t1.Contains("N1094=,2\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写自动滚动关闭", t1.Contains("N1095=,0\r\n") ? "yes" : "no", "yes");
+            CheckText("ini 写高亮规则", t1.Contains("\r\nN1096=,") ? "yes" : "no", "yes");
 
             var loaded = IniDocument.Load(t1);
             string t2 = IniDocument.Save(loaded);
@@ -534,6 +537,7 @@ internal static class SelfTest
             CheckText("ini 含第3页键", t1.Contains("\r\nN401=A,第三页\r\n") && t1.Contains("\r\nN501=0,1,2500\r\n") ? "yes" : "no", "yes");
             CheckText("ini 还原多条页数", loaded.MultiPageCount.ToString(), "2");
             CheckText("ini 还原自动滚动关闭", loaded.AutoScroll ? "yes" : "no", "no");
+            CheckText("ini 还原高亮规则", loaded.HighlightRulesJson, "{\"v\":1}");
             CheckText("ini 新档默认自动滚动", new IniSnapshot().AutoScroll ? "yes" : "no", "yes");
             CheckText("旧ini默认自动滚动", IniDocument.Load("").AutoScroll ? "yes" : "no", "yes");
             var legacy = IniDocument.Load("N1=A,hello\r\nN101=2,cmt,1500\r\n");
@@ -581,6 +585,160 @@ internal static class SelfTest
             {
                 try { Directory.Delete(dir, true); } catch { /* 临时目录删不掉不影响结果 */ }
             }
+        }
+
+        // —— 日志高亮规则 ——
+        {
+            var palette = new LogHighlightPalette(
+                Color.White, Color.Black, Color.Gray, Color.Teal, Color.Goldenrod,
+                Color.Teal, Color.LightGoldenrodYellow);
+            const string sample = "[10:00:00.000]收←◆ hello ERROR world";
+            var line = LogFormatter.Parse(sample, false)[0];
+
+            var highlighter = new LogHighlighter();
+            highlighter.SetRules(new[]
+            {
+                new LogHighlightRule
+                {
+                    Name = "err", Pattern = "ERROR", IsRegex = false, Enabled = true,
+                    ForeColor = Color.Red.ToArgb(),
+                },
+            });
+            StyledLogLine styled = highlighter.Style(line, palette);
+            CheckText("高亮规则命中", styled.Matched ? "yes" : "no", "yes");
+            CheckText("高亮只改匹配文字",
+                styled.Runs.First(run => run.Text.Contains("ERROR")).Fore.ToArgb().ToString(),
+                Color.Red.ToArgb().ToString());
+
+            highlighter.SetRules(new[]
+            {
+                new LogHighlightRule
+                {
+                    Name = "整行", Pattern = "ERROR", IsRegex = false, Enabled = true,
+                    WholeLine = true, BackColor = Color.FromArgb(0x55, 0, 0, 255).ToArgb(),
+                    ForeColor = Color.Blue.ToArgb(),
+                },
+            });
+            styled = highlighter.Style(line, palette);
+            CheckText("高亮整行背景", styled.Runs.All(run => run.Back == styled.Back) ? "yes" : "no", "yes");
+
+            highlighter.SetRules(new[]
+            {
+                new LogHighlightRule { Name = "first", Pattern = "ERROR", ForeColor = Color.Red.ToArgb() },
+                new LogHighlightRule { Name = "second", Pattern = "ERROR", ForeColor = Color.Green.ToArgb() },
+            });
+            styled = highlighter.Style(line, palette);
+            CheckText("高亮按列表优先级",
+                styled.Runs.First(run => run.Text.Contains("ERROR")).Fore.ToArgb().ToString(),
+                Color.Red.ToArgb().ToString());
+
+            highlighter.SetRules(new[]
+            {
+                new LogHighlightRule
+                {
+                    Name = "只接收", Pattern = "ERROR", Rx = true, Tx = false,
+                    ForeColor = Color.Red.ToArgb(),
+                },
+            });
+            var txLine = LogFormatter.Parse("[10:00:00.000]发→◇ ERROR", false)[0];
+            CheckText("高亮作用范围", highlighter.Style(txLine, palette).Matched ? "yes" : "no", "no");
+
+            highlighter.SetRules(new[]
+            {
+                new LogHighlightRule
+                {
+                    Name = "区分大小写", Pattern = "error", CaseSensitive = true,
+                    ForeColor = Color.Red.ToArgb(),
+                },
+            });
+            CheckText("高亮区分大小写", highlighter.Style(line, palette).Matched ? "yes" : "no", "no");
+
+            highlighter.SetRules(new[]
+            {
+                new LogHighlightRule { Name = "坏正则", Pattern = "(", IsRegex = true },
+            });
+            CheckText("坏正则有错误提示", highlighter.Errors.Count.ToString(), "1");
+            CheckText("坏正则不影响其他规则", highlighter.ActiveCount.ToString(), "0");
+
+            List<LogHighlightRule> defaults = LogHighlightRuleStore.CreateDefaults(true);
+            CheckText("预置规则数量", defaults.Count.ToString(), "9");
+            CheckText("预置仅错误警告开启",
+                string.Join(",", defaults.Where(rule => rule.Enabled).Select(rule => rule.Name)), "错误,警告");
+            CheckText("预置规则名称", string.Join(",", defaults.Select(rule => rule.Name)),
+                "错误,警告,成功 / OK,连接状态,GPS / 定位,MQTT / 网络,AT 命令,心跳,调试");
+            CheckText("预置规则都有标识", defaults.All(rule => rule.PresetKey.Length > 0) ? "yes" : "no", "yes");
+
+            var off = defaults.Select(rule =>
+            {
+                LogHighlightRule copy = rule.Clone();
+                copy.Enabled = false;
+                return copy;
+            }).ToList();
+            highlighter.SetRules(off);
+            styled = highlighter.Style(line, palette);
+            CheckText("关闭全部规则后不命中", styled.Matched ? "yes" : "no", "no");
+            CheckText("关闭全部规则后错误不着色",
+                styled.Runs.First(run => run.Text.Contains("ERROR")).Fore.ToArgb().ToString(),
+                palette.DefaultFore.ToArgb().ToString());
+            CheckText("关闭全部规则后无背景",
+                styled.Runs.All(run => run.Back == palette.DefaultBack) ? "yes" : "no", "yes");
+
+            highlighter.SetRules(defaults);
+            const string errorSample = "[10:00:00.000]收←◆ 帧校验失败：期望 37 4B";
+            CheckText("预置错误规则命中中文错误",
+                highlighter.Style(LogFormatter.Parse(errorSample, false)[0], palette).Matched ? "yes" : "no", "yes");
+
+            string defaultsJson = LogHighlightRuleStore.ToJson(defaults);
+            List<LogHighlightRule> roundtrip = LogHighlightRuleStore.FromJson(defaultsJson, out int rulesVersion);
+            CheckText("高亮 JSON 版本", rulesVersion.ToString(), LogHighlightRuleStore.CurrentVersion.ToString());
+            CheckText("高亮 JSON 往返规则数", roundtrip.Count.ToString(), "9");
+            CheckText("高亮 JSON 保留预置标识", roundtrip[0].PresetKey, "error");
+            CheckText("高亮 Base64 往返",
+                LogHighlightRuleStore.FromBase64(LogHighlightRuleStore.ToBase64(defaults)).Count.ToString(), "9");
+
+            string legacyJson = "[{\"Name\":\"ERROR\",\"Pattern\":\"ERROR\",\"Enabled\":true,\"Rx\":true,\"Tx\":true}," +
+                                "{\"Name\":\"WARN\",\"Pattern\":\"WARN\",\"Enabled\":false,\"Rx\":true,\"Tx\":true}]";
+            List<LogHighlightRule> legacyRules = LogHighlightRuleStore.FromJson(legacyJson, out int legacyVersion);
+            CheckText("旧数组规则可读", legacyRules.Count.ToString(), "2");
+            CheckText("旧数组版本为零", legacyVersion.ToString(), "0");
+            List<LogHighlightRule> upgraded = LogHighlightRuleStore.Upgrade(legacyRules, true, legacyVersion);
+            CheckText("升级补齐预置规则", upgraded.Count.ToString(), "9");
+            CheckText("升级保留旧规则开关", upgraded[1].Enabled ? "yes" : "no", "no");
+            CheckText("升级补的预置默认关闭",
+                upgraded.Skip(2).All(rule => !rule.Enabled) ? "yes" : "no", "yes");
+            CheckText("升级识别旧错误规则", upgraded[0].PresetKey, "error");
+            CheckText("升级后不重复补齐",
+                LogHighlightRuleStore.Upgrade(upgraded, true, LogHighlightRuleStore.CurrentVersion).Count.ToString(), "9");
+
+            var previewPalette = new LogHighlightPalette(
+                Color.White, Color.Black, Color.Gray, Color.Teal, Color.Goldenrod,
+                Color.Teal, Color.LightGoldenrodYellow);
+            bool presetsPreviewable = true;
+            foreach (LogHighlightRule preset in defaults)
+            {
+                LogHighlightRule offPreset = preset.Clone();
+                offPreset.Enabled = false;
+                if (HighlightRulesDialog.PreviewStyledLines(
+                        offPreset, new[] { offPreset }, null, previewPalette).Count == 0)
+                    presetsPreviewable = false;
+            }
+            CheckText("全部预置关闭也能预览", presetsPreviewable ? "yes" : "no", "yes");
+
+            var customKeyword = new LogHighlightRule { Name = "自定义", Pattern = "NEEDLE", Enabled = false };
+            CheckText("自定义关键字关闭也能预览",
+                HighlightRulesDialog.PreviewStyledLines(
+                    customKeyword, new[] { customKeyword }, null, previewPalette).Count > 0 ? "yes" : "no",
+                "yes");
+
+            var customRegex = new LogHighlightRule
+            {
+                Name = "数字", Pattern = @"\d{3}", IsRegex = true, Enabled = false,
+            };
+            CheckText("自定义正则可从最近日志预览",
+                HighlightRulesDialog.PreviewStyledLines(
+                    customRegex, new[] { customRegex },
+                    "[10:00:00.000]收←◆ value 123", previewPalette).Count > 0 ? "yes" : "no",
+                "yes");
         }
 
         // —— 主窗体：接收区占大头，选项保持一行，发送框是矮条 ——
@@ -635,6 +793,33 @@ internal static class SelfTest
                 form.CompletePendingRenderLogForTest();
                 CheckText("分块重画可同步收尾", form.RenderLogBusyForTest ? "yes" : "no", "no");
                 CheckText("同步收尾后内容完整", form.LogTextLengthForBenchmark.ToString(), chunkText.Length.ToString());
+                form.RenderLogForTest("");
+                Application.DoEvents();
+
+                var rulesOff = LogHighlightRuleStore.CreateDefaults(Theme.IsLight)
+                    .Select(rule =>
+                    {
+                        LogHighlightRule copy = rule.Clone();
+                        copy.Enabled = false;
+                        return copy;
+                    }).ToList();
+                form.SetHighlightRulesForTest(rulesOff);
+                form.RenderLogForTest("[10:00:00.000]收←◆ ERROR timeout");
+                form.CompletePendingRenderLogForTest();
+                int errorAt = recv.Text.IndexOf("ERROR", StringComparison.Ordinal);
+                recv.Select(errorAt, 5);
+                CheckText("关闭规则后渲染不着色",
+                    recv.SelectionColor.ToArgb().ToString(), recv.ForeColor.ToArgb().ToString());
+                CheckText("关闭规则后渲染无底色",
+                    recv.SelectionBackColor.ToArgb().ToString(), recv.BackColor.ToArgb().ToString());
+
+                form.SetHighlightRulesForTest(LogHighlightRuleStore.CreateDefaults(Theme.IsLight));
+                form.RenderLogForTest("[10:00:00.000]收←◆ ERROR timeout");
+                form.CompletePendingRenderLogForTest();
+                errorAt = recv.Text.IndexOf("ERROR", StringComparison.Ordinal);
+                recv.Select(errorAt, 5);
+                CheckText("开启错误规则后渲染着色",
+                    recv.SelectionColor.ToArgb() != recv.ForeColor.ToArgb() ? "yes" : "no", "yes");
                 form.RenderLogForTest("");
                 Application.DoEvents();
 
@@ -851,6 +1036,34 @@ internal static class SelfTest
                 form.RemoveMultiPageForTest(1);
                 CheckText("删除到只剩一页", form.MultiPageCountForTest.ToString(), "1");
                 CheckText("只剩第1页可见", form.MultiPageVisibleForTest(0) && !form.MultiPageVisibleForTest(1) ? "yes" : "no", "yes");
+            }
+
+            form.SetMultiPageDataForTest(0, 0, "palette-command");
+            form.OpenCommandPaletteForTest();
+            Application.DoEvents();
+            CheckText("命令面板可打开", form.CommandPaletteVisibleForTest ? "yes" : "no", "yes");
+            CheckText("命令面板有已保存命令", form.CommandPaletteItemCountForTest > 0 ? "yes" : "no", "yes");
+            form.SetCommandPaletteQueryForTest("palette-command");
+            Application.DoEvents();
+            CheckText("命令面板搜索命中", form.CommandPaletteFilteredCountForTest >= 1 ? "yes" : "no", "yes");
+            form.SetCommandPaletteQueryForTest("no-such-command");
+            Application.DoEvents();
+            CheckText("命令面板搜索无结果", form.CommandPaletteFilteredCountForTest.ToString(), "0");
+            form.CloseCommandPaletteForTest();
+            Application.DoEvents();
+            CheckText("命令面板可关闭", form.CommandPaletteVisibleForTest ? "yes" : "no", "no");
+
+            Button? paletteButton = null;
+            foreach (var c in AllControls(form))
+                if (c is Button button && button.Text == "命令面板") paletteButton = button;
+            CheckText("命令面板有按钮入口", paletteButton is null ? "no" : "yes", "yes");
+            if (paletteButton is not null)
+            {
+                paletteButton.PerformClick();
+                Application.DoEvents();
+                CheckText("按钮可打开命令面板", form.CommandPaletteVisibleForTest ? "yes" : "no", "yes");
+                form.CloseCommandPaletteForTest();
+                Application.DoEvents();
             }
 
             form.ToggleComposerForTest();

@@ -1,8 +1,8 @@
 # 交接文档：sscomRe（串口/网络数据调试器 定制版）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前版本 **v1.2.0**（2026-10-26），版本记录见 [CHANGELOG.md](CHANGELOG.md)。
-> 当前状态（2026-10-26）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏 + 日志头伸缩开关、Phase 3B 设置浮层、Phase 3C RTF 日志性能/即时面板/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、日志自动跟随、发送设置重排、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动始终跟随、日志头端口快捷下拉、多条面板方案 02 已落地；`--selftest` 265/265 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前版本 **v1.3.0**（2026-10-27），版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态（2026-10-27）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏 + 日志头伸缩开关、Phase 3B 设置浮层、Phase 3C RTF 日志性能/即时面板/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、日志自动跟随、发送设置重排、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动始终跟随、日志头端口快捷下拉、多条面板方案 02、日志高亮规则（9 条预置，错误/警告默认开启，可预览）与 Ctrl+K 命令面板（工具栏按钮入口）已落地；`--selftest` 315/315 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -62,7 +62,10 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   InputNormalizer.cs    行内数字框归一化（光标规则）
   LogPortPicker.cs      日志头端口快捷下拉（复用端口浮层）
   ThemeSwitch.cs        开关式复选框（循环发送）
-  SelfTest.cs           --selftest 用例（当前 265 项）
+  LogHighlightRule.cs   日志高亮规则模型、匹配引擎、JSON/Base64 持久化
+  HighlightRulesDialog.cs 高亮规则管理（整行着色、导入/导出）
+  CommandPalette.cs     Ctrl+K 已保存命令面板
+  SelfTest.cs           --selftest 用例（当前 315 项）
 ```
 
 ---
@@ -89,7 +92,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `sscomRe_v1.2.0.exe --selftest` → `pass=265 fail=0`
+- `sscomRe_v1.3.0.exe --selftest` → `pass=315 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境有 COM38/COM39，只做了接收、换口和侧栏伸缩冒烟；DTR/RTS、发送文件、定时发送与真实网口仍需在目标硬件复验
 
@@ -100,23 +103,23 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 ```bash
 cd SscomRe
 dotnet build -c Release
-# 输出固定为 SscomRe/bin/net48/sscomRe_v1.2.0.exe（csproj 固定 OutputPath + AssemblyName）
+# 输出固定为 SscomRe/bin/net48/sscomRe_v1.3.0.exe（csproj 固定 OutputPath + AssemblyName）
 
 cd bin/net48
-./sscomRe_v1.2.0.exe --selftest          # 必须 pass=265 fail=0
-./sscomRe_v1.2.0.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
+./sscomRe_v1.3.0.exe --selftest          # 必须 pass=315 fail=0
+./sscomRe_v1.3.0.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
 
 # 冒烟：跑 ≥5 秒，检查没崩
 rm -f crash.log
-(./sscomRe_v1.2.0.exe &) && sleep 5
+(./sscomRe_v1.3.0.exe &) && sleep 5
 ls crash.log && echo "崩了，看日志" || echo "正常"
-taskkill //IM sscomRe_v1.2.0.exe //F
+taskkill //IM sscomRe_v1.3.0.exe //F
 ```
 
 **约定：**
 
 - `sscom51.ini` 按**当前工作目录**读写；自检和冒烟务必在 `bin/net48` 下启动。自检会自动备份/恢复现有 ini，避免测试字体、模式、窗口几何污染用户配置。
-- 不要杀用户正在用的窗口；编译报 `MSB3027/文件被锁定` 说明 `bin/net48/sscomRe_v1.2.0.exe` 正在运行，先关闭再编译，不要用 `-o` 另开目录。
+- 不要杀用户正在用的窗口；编译报 `MSB3027/文件被锁定` 说明 `bin/net48/sscomRe_v1.3.0.exe` 正在运行，先关闭再编译，不要用 `-o` 另开目录。
 - 任何未处理异常都会写 exe 同目录的 `crash.log`，先看它。
 - 新增逻辑尽量抽成**纯类**（如 `Checksums`、`TerminalInput`、`MultiSendPlanner`）并在 `--selftest` 加用例；网络类可写本机回环测试。
 - 每次改动跑：build → selftest → 5 秒冒烟，三步都过再汇报。
@@ -145,6 +148,7 @@ taskkill //IM sscomRe_v1.2.0.exe //F
 - `N<k>`/`N<100+k>` 第 1 页；第 2 页 `N201–N299`/`N301–N399`；第 3 页 `N401–N499`/`N501–N599`。旧 ini 只有第 1 页时，后两页保持默认。
 - `N1094` 记录可见页数（1–3，缺省 1）；第 1 页始终存在，第 2/3 页可通过页签 `＋` 增加、`×` 删除。删除中间页时其后页内容依次前移，末页清空；删除前二次确认，默认按钮为“否”。
 - `N1095` 记录「自动滚动」开关（缺省 1）。勾选时 `AppendRecv/RenderLogFromText` 始终滚到最新（不再判断是否在底部），`SizeChanged/DpiChanged/Activated/Move` 也会 `ScheduleScrollRecvToLatest` 回底；关闭后才保留用户当前滚动位置。日志头的「暂停/继续」与这个开关是同一状态。
+- `N1096` 保存日志高亮规则：新格式为带版本号的 UTF-8 JSON（`{"Version":2,"Rules":[...]}`）再 Base64 写入 ini，仍兼容旧的裸数组。首次启动生成 9 条预置规则，仅「错误/警告」默认开启；旧版只有 ERROR/WARN 的配置在加载时自动补齐其余预置（默认关闭），并按名称识别旧规则，不重复添加。规则的 JSON 也可从「显示 → 日志高亮规则...」导入/导出。
 - 数据字段转义：`,`→`0x02`、CR→`0x03`、LF→`0x04`；设置行格式 `N<键>=,<值>`。
 - 关窗：停定时器 → `SaveConfig()` → 断网络/关串口。保存几何时最大化用 `RestoreBounds`，不保存屏幕外边界。
 - 多条数据/顺序/延时框按键走约 400ms 防抖再写 ini；勾选、注释和「保存参数」仍马上写。关窗会停掉防抖定时器再按当前控件内容写一次。
@@ -198,6 +202,9 @@ taskkill //IM sscomRe_v1.2.0.exe //F
 - 多条字符串不再用 `TabControl`（原生页框在深色下始终有浅色边），改为 `pageHost` + `pageBar` 自绘页签；`_multiPageCount`/`_multiPage`/`_multiPages`/`_multiTabs`/`_multiCloseTabs` 管理页数、选中页与显隐，`_multiAddTab` 在 3 页时禁用。删除页只清控件数据，不销毁 99 行控件；自检用内部页数/数据钩子验证增删与移位。
 - 多条面板方案 02（v1.2.0）：根为 5 行 `TableLayoutPanel`（标题/工具条/页签/表格卡/页脚），表格卡是自绘 `CardPanel`，页签用 `ThemeButton.Segment(SegmentSelected)`，循环发送用 `ThemeSwitch`，行按钮用 `ThemeButton.Soft + AccentText`。`MultiRowsPanel` 自绘斑马纹/悬停行/表头强调线/圆角字段底和聚焦描边，单元格文本框统一 `BorderStyle=None` 并用 `Rectangle.Inflate(bounds,2,2)` 画出圆角边框；改行高/列宽时要同步这段绘制。
 - 日志头端口下拉 `LogPortPicker` 与连接栏 `PortField` 共用 `PortPopup`：`TogglePortPopup(anchor)` 记录 `_portPopupAnchor`，关闭时同时复位两个控件的 `Opened`；`PortPopupDismissFilter` 必须放行 `IsPortPopupAnchor` 里的两个锚点，否则点标题会先关再开。
+- 日志高亮在 `LogHighlighter.Style` 内按字符级 owner 实现“列表靠前优先”；规则背景 A<255 时先与日志底色混合再写 RTF。有启用规则时 `AppendFormatted` 会先用 `HasAnyMatch` 做整批预筛，纯数据无命中仍走 `AppendText` 快路径；新增依赖日志文本的操作要先考虑分块重画是否完成。
+- 高亮规则预览：选中规则即使关闭也按开启效果预览；候选行依次取预置示例/关键字示例、最近 40 行日志命中、通用示例，最多显示 3 行。`HighlightRulesDialog.PreviewStyledLines` 是纯逻辑并有自检，改动预览时不要退回固定 ERROR 示例。
+- Ctrl+K 命令面板只读已保存命令：可见页读控件，未建页读 `_multiRowSource`；`CommandPaletteDismissFilter` 负责点击外部关闭，`Ctrl+K`/Esc 在 `ProcessCmdKey` 中切换。顶部工具栏「命令面板」按钮是唯一鼠标入口（`BuildToolBar`），面板不包含清空/删除类操作。
 - composer 设置行高度按 `RowHeightOf` 额外 +4px（`UpdateComposerGridRows`），给自绘下拉框/按钮留 Margin。
 - 禁止在深色控件上再用 `SystemColors.Control/Window/WindowText` 或 `Color.White/Yellow`；所有颜色走 `Theme` token。
 
@@ -209,7 +216,7 @@ taskkill //IM sscomRe_v1.2.0.exe //F
 - N1093 与 N1092 一样是重写版新增 ini 键（0 展开、1 折叠），原版忽略。
 - composer：`BuildComposer` 使用 `_settingsRow1` + `_sendArea` 两个控件；低频设置项在接收/发送浮层中（见 §5.5），`UpdateComposerGridRows` 写行高；`━` 按钮在设置行最右侧，只折叠 `_sendArea`，设置行保留。左栏和中心之间用 `ResizeSplitter` 拖动改宽（本次运行内有效，未写 ini）。
 - 接收框：`ThemeRichTextBox`（继承 RichTextBox），字段仍是 `_recvBox`；线程模型不变，所有富文本操作只在界面线程的 `DrainDisplay` 路径执行。
-- 分色：`LogFormatter.Parse` 把文本拆成 Timestamp/Rx/Tx/Error/Data/Hex；`AppendFormatted` 用 `SelectionColor/SelectionBackColor` 逐段追加。TX 行暖底、错误行红底，来源是 `Theme.TxWash/ErrorWash`。
+- 分色：`LogFormatter.Parse` 把文本拆成 Timestamp/Rx/Tx/Data/Hex；`AppendFormatted` 用 `SelectionColor/SelectionBackColor` 逐段追加。TX 行暖底来自 `Theme.TxWash`；错误/警告等关键字颜色**只由高亮规则产生**，日志层没有内置错误着色，关闭规则即恢复普通文字。
 - 重画：主题/字体/颜色变化用 `RenderLogAll()`，它基于**当前可见文本**重解析，因此发送回显和终端本地输入也会保留；切换 HEX/文本显示用 `RenderLogBuffer()`，基于 `_receive.HexText/TextAccum`。不要用 `_receive` 缓冲去重画主题，否则会丢发送回显。
 - 滚动：`_autoFollow` 为真且原来在底部时跟随；暂停/向上翻看时保持原选择/滚动位置。`RecvAtBottom` 用最后一个字符的 `GetPositionFromCharIndex().Y` 是否在客户区内判断，**不要用 `GetScrollInfo` 的 nMax/nPage**（不同 RichEdit 版本会差一行，导致日志永远不跟随）。`EM_GETSCROLLPOS`/`EM_SETSCROLLPOS` 兼容 RichTextBox。
 - 搜索：`_searchBox` + `SearchNext(forward)` + `_recvBox.Find`；当前匹配用 `Theme.SearchHighlight` 作为 SelectionBackColor，下一次搜索/重画前清理。

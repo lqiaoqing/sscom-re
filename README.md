@@ -2,9 +2,9 @@
 
 按逆向整理出的行为规格，用 **C# WinForms / .NET Framework 4.8** 重写 `sscom5.13.1.exe`（Delphi/VCL 串口网络调试工具）的日常收发功能。
 
-- 当前版本：**v1.2.0**（2026-10-26）；版本记录见 [CHANGELOG.md](CHANGELOG.md)
+- 当前版本：**v1.3.0**（2026-10-27）；版本记录见 [CHANGELOG.md](CHANGELOG.md)
 - 行为唯一依据：[sscom5.13.1-rewrite-spec.md](sscom5.13.1-rewrite-spec.md)
-- 当前状态：M1–M9 全部实现；Phase 1 深/浅双主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏、Phase 3B 设置浮层、Phase 3C 日志性能/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、发送设置重排、日志自动跟随、状态栏曲线移除、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动开关、日志头端口快捷下拉与多条面板方案 02 已落地；`--selftest` 265/265 通过
+- 当前状态：M1–M9 全部实现；Phase 1 深/浅双主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏、Phase 3B 设置浮层、Phase 3C 日志性能/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、发送设置重排、日志自动跟随、状态栏曲线移除、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动开关、日志头端口快捷下拉、多条面板方案 02、日志高亮规则（9 条预置，错误/警告默认开启）与 Ctrl+K 命令面板已落地；`--selftest` 315/315 通过
 - 目标系统：Windows 10/11（自带 .NET Framework 4.8）
 - 原版程序、解包镜像和反编译源码**不在本仓库中**，详见 [_analysis/README.md](_analysis/README.md)
 
@@ -53,6 +53,8 @@
 - 串口已打开时从端口下拉或「通讯端口」菜单换到另一个 COM 口，会自动关闭旧口并打开新口；打开失败保留关闭状态，下一次选择仍会继续尝试
 - 发送区设置行新增「自动滚动」开关（默认勾选）：勾选时日志始终显示最新内容，上翻后新数据也会拉回底部，全屏/缩放/切回窗口后自动回底；关闭后新数据不改变当前滚动位置；状态写入 `N1095`
 - 日志头的端口名（如 `COM38 ▾`）是快捷下拉：点击打开同一套端口浮层，直接切换串口/网络模式，不需要展开左栏
+- 日志高亮规则：显示菜单可管理关键字/正则规则，支持整行着色、收/发范围、颜色、优先级、JSON 导入/导出；预置 9 条通用规则（错误、警告、成功、连接状态、GPS、MQTT、AT、心跳、调试），仅「错误/警告」默认开启，其余按需打开；预览会显示匹配示例或最近日志命中，选中的关闭规则也按开启效果预览；关键字着色完全由规则驱动，关闭规则即恢复普通文字；规则写入 `N1096`，旧配置会自动补齐新预置
+- Ctrl+K 命令面板：搜索所有已保存的多条命令（含未建页），Enter 发送、Ctrl+Enter 填入发送框，最近发送优先显示；顶部工具栏有「命令面板」按钮入口
 - UDP 收到数据时把发送方 IP 回填到「远程IP」
 
 ### 界面主题（Phase 1）
@@ -82,7 +84,7 @@
 
 - 三栏布局：左侧连接栏（端口/波特率/RTS/DTR/网络字段）、中间日志与发送区、右侧可折叠多条字符串抽屉
 - 左栏可完全隐藏，连接状态继续显示在日志头；日志头左侧 `«/»` 是唯一伸缩开关。`N1093` 记忆，窄窗自动折叠，手动操作后本次运行不再自动切换
-- 接收日志改为富文本：时间戳灰、RX 青绿、TX 琥珀、错误红、HEX 暗青；TX 行带暖色底、错误行带红色底
+- 接收日志改为富文本：时间戳灰、RX 青绿、TX 琥珀、HEX 暗青；TX 行带暖色底；错误/警告等关键字颜色由高亮规则提供，关闭规则后不再自动着色
 - 日志搜索（Enter / Shift+Enter 前后查找）、暂停跟随、右键复制/复制纯数据/全选/清除
 - 状态栏显示 RX/TX 实时速率和缓冲占用（已按要求移除速率曲线）
 - 发送区仍在底部，包含 HEX 显示/发送、加时间戳/回车、定时发送、帧首/帧尾/校验等全部原控件
@@ -107,9 +109,9 @@ dotnet build -c Release
 输出固定为：
 
 ```
-SscomRe/bin/net48/sscomRe_v1.2.0.exe
-SscomRe/bin/net48/sscomRe_v1.2.0.exe.config
-SscomRe/bin/net48/sscomRe_v1.2.0.pdb
+SscomRe/bin/net48/sscomRe_v1.3.0.exe
+SscomRe/bin/net48/sscomRe_v1.3.0.exe.config
+SscomRe/bin/net48/sscomRe_v1.3.0.pdb
 ```
 
 可执行文件名由 csproj 的 `AssemblyName` 指向 `sscomRe_v$(Version)`；图标为 `SscomRe/Assets/sscomRe.ico`，同时嵌入 exe 和窗口标题栏。
@@ -118,11 +120,11 @@ SscomRe/bin/net48/sscomRe_v1.2.0.pdb
 
 ## 运行
 
-双击 `sscomRe_v1.2.0.exe`，或在命令行中：
+双击 `sscomRe_v1.3.0.exe`，或在命令行中：
 
 ```bash
 cd SscomRe/bin/net48
-./sscomRe_v1.2.0.exe
+./sscomRe_v1.3.0.exe
 ```
 
 注意：`sscom51.ini` 按**当前工作目录**读写。从仓库根启动会读写根目录的 ini；从 `bin/net48` 启动会读写该目录的 ini。从资源管理器双击时当前目录就是 exe 目录，与原版行为一致。
@@ -131,11 +133,11 @@ cd SscomRe/bin/net48
 
 ```bash
 cd SscomRe/bin/net48
-./sscomRe_v1.2.0.exe --selftest
+./sscomRe_v1.3.0.exe --selftest
 ```
 
-- 当前结果：`SELFTEST pass=265 fail=0`
-- 覆盖组包/转义、7 种校验、接收显示与截断、多条发送状态机、ini 往返、终端按键、窗口几何、主窗体布局、设置浮层开关、搜索 toast、发送区收起/展开、自动滚动开关、日志头端口下拉等
+- 当前结果：`SELFTEST pass=315 fail=0`
+- 覆盖组包/转义、7 种校验、接收显示与截断、多条发送状态机、ini 往返、终端按键、窗口几何、主窗体布局、设置浮层开关、搜索 toast、发送区收起/展开、自动滚动开关、日志头端口下拉、日志高亮规则、命令面板搜索等
 - 自检会临时创建主窗体并触发自动保存；开始前会备份现有 `sscom51.ini`，结束后原样恢复（没有则删除）
 - 布局检查按 `DeviceDpi` 缩放测试窗口，100%–200% 缩放下都可复现
 
@@ -145,9 +147,9 @@ cd SscomRe/bin/net48
 
 ```bash
 cd SscomRe/bin/net48
-./sscomRe_v1.2.0.exe --bench-log 2 30       # 2 MiB，30 KiB/块，文本显示
-./sscomRe_v1.2.0.exe --bench-log 1 30 --hex # HEX 显示
-./sscomRe_v1.2.0.exe --bench-log 1 30 --shot bench.png  # 额外保存一张分色日志截图
+./sscomRe_v1.3.0.exe --bench-log 2 30       # 2 MiB，30 KiB/块，文本显示
+./sscomRe_v1.3.0.exe --bench-log 1 30 --hex # HEX 显示
+./sscomRe_v1.3.0.exe --bench-log 1 30 --shot bench.png  # 额外保存一张分色日志截图
 ```
 
 压测走真实窗体的 `HandleIncoming → DrainDisplay → RTF 插入` 路径，统计每块的平均/最大界面耗时；默认目标为 30 KiB/块，对应 1 MiB/s 接收：
@@ -161,7 +163,7 @@ cd SscomRe/bin/net48
 目标机只需 Windows 10/11 自带的 .NET Framework 4.8：
 
 1. `dotnet build -c Release`
-2. 拷贝 `sscomRe_v1.2.0.exe` 和 `sscomRe_v1.2.0.exe.config` 到目标目录
+2. 拷贝 `sscomRe_v1.3.0.exe` 和 `sscomRe_v1.3.0.exe.config` 到目标目录
 3. 在该目录运行（ini 与保存/接收文件都写在运行目录）
 
 不需要安装 .NET 运行时，也不提供单文件发布。
@@ -190,6 +192,9 @@ SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
   ThemeRichTextBox.cs         接收日志富文本框
   ThemeButton.cs              自绘按钮与矢量图标
   ThemeCheckBox.cs            自绘复选框（琥珀勾选）
+  LogHighlightRule.cs         日志高亮规则模型、匹配引擎与持久化
+  HighlightRulesDialog.cs     日志高亮规则管理对话框
+  CommandPalette.cs           Ctrl+K 命令面板及其列表绘制
   ThemeComboBox.cs            自绘下拉框（覆盖原生浅色按钮/滚动条）
   ThemeTextBox.cs             深色输入框与占位文字
   ComPortService.cs           串口层
@@ -227,7 +232,7 @@ SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
 
 ## 故障排查
 
-- **编译报 `MSB3027` / 文件被锁定**：`sscomRe_v1.2.0.exe` 正在运行，关闭窗口后重编，不要用 `-o` 换输出目录
+- **编译报 `MSB3027` / 文件被锁定**：`sscomRe_v1.3.0.exe` 正在运行，关闭窗口后重编，不要用 `-o` 换输出目录
 - **启动即闪退**：查看 exe 同目录的 `crash.log`
 - **端口下拉只有 TCPClient**：本机没有枚举到串口；按规格自动切到 TCP 客户端，插好设备后点「通讯端口 → 刷新串口列表」
 - **保存参数失败**：确认 exe 所在目录（或当前工作目录）可写，检查 `sscom51.ini`
