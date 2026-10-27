@@ -1593,7 +1593,7 @@ public sealed partial class MainForm : Form
             foreach (Control c in Controls)
             {
                 if (c is not TextBox || c.Tag is not Point cell || cell.Y is not (1 or 3 or 4)) continue;
-                if (!c.Visible) continue;
+                if (cell.X < first || cell.X > last || !c.Visible) continue;
                 Rectangle field = Rectangle.Inflate(c.Bounds, 2, 2);
                 if (!clip.IntersectsWith(field)) continue;
                 using GraphicsPath path = Theme.RoundedRect(field, Theme.Scale(this, 7));
@@ -1893,9 +1893,16 @@ public sealed partial class MainForm : Form
             return;
         }
 
-        int selStart = _recvBox.SelectionStart;
-        int selLen = _recvBox.SelectionLength;
-        Point scroll = GetRecvScroll();
+        bool follow = _autoScrollBox.Checked;
+        int selStart = 0;
+        int selLen = 0;
+        Point scroll = Point.Empty;
+        if (!follow)
+        {
+            selStart = _recvBox.SelectionStart;
+            selLen = _recvBox.SelectionLength;
+            scroll = GetRecvScroll();
+        }
 
         // 一批最多几十 KB；关掉重绘后只做一次最终 Invalidate，避免逐段着色时反复绘制整个文档。
         SendMessage(_recvBox.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
@@ -1909,9 +1916,9 @@ public sealed partial class MainForm : Form
             _recvBox.Invalidate();
         }
 
-        if (_autoScrollBox.Checked)
+        if (follow)
         {
-            ScrollRecvToLatest();
+            EnsureRecvAtLatest();
         }
         else
         {
@@ -2062,6 +2069,7 @@ public sealed partial class MainForm : Form
     /// <summary>只在控件内原地查找标记，避免为判断一次把整段 1M 字符复制成字符串。</summary>
     private bool LogHasTimestampMarkers()
     {
+        CompletePendingRenderLog();
         if (!_recvBox.IsHandleCreated)
             return _recvBox.Text.Contains('←') || _recvBox.Text.Contains('→');
         if (_recvBox.TextLength == 0) return false;
@@ -2084,6 +2092,7 @@ public sealed partial class MainForm : Form
     /// <summary>保存数据：接收窗口内容另存为 SaveWindows 时间戳 .TXT；原始接收缓冲写成 SAVE 时间戳 .DAT。</summary>
     private void SaveData()
     {
+        CompletePendingRenderLog();                        // 保存的是完整窗口内容，不能是半屏
         string dir = Directory.GetCurrentDirectory();      // 规格：当前目录
         string dt = SendComposer.FileTimestamp();
         string datPath = Path.Combine(dir, "SAVE" + dt + ".DAT");

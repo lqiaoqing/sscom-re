@@ -492,6 +492,13 @@ internal static class SelfTest
             CheckText("ini 以end结尾", t1.TrimEnd().EndsWith(";end") ? "yes" : "no", "yes");
             CheckText("ini 转义逗号", t1.Contains("0x02") ? "yes" : "no", "yes");
             CheckText("ini 转义换行", t1.Contains("0x03") && t1.Contains("0x04") ? "yes" : "no", "yes");
+            var rawCtl = IniDocument.Load("N1=A,a\u0002b\r\n");
+            CheckText("ini 原始STX按逗号读入", rawCtl.Data[0], "a,b");
+            var ctlSnap = new IniSnapshot();
+            ctlSnap.Data[0] = "a\u0002b";
+            string ctlText = IniDocument.Save(ctlSnap);
+            CheckText("ini 原始STX保存为转义", ctlText.Contains("\u0002") ? "yes" : "no", "no");
+            CheckText("ini 原始STX转义为0x02", ctlText.Contains("N1=A,a0x02b\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写N1100为C", t1.Contains("N1100=,C\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写N1058为1000", t1.Contains("N1058=,1000\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写浅色主题", t1.Contains("N1092=,1\r\n") ? "yes" : "no", "yes");
@@ -622,6 +629,15 @@ internal static class SelfTest
                 !hasDescribedPort || descriptionsFormed ? "yes" : "no", "yes");
             if (recv is not null)
             {
+                string chunkText = new('x', 70_000);
+                form.RenderLogForTest(chunkText);
+                CheckText("分块重画进入排队", form.RenderLogBusyForTest ? "yes" : "no", "yes");
+                form.CompletePendingRenderLogForTest();
+                CheckText("分块重画可同步收尾", form.RenderLogBusyForTest ? "yes" : "no", "no");
+                CheckText("同步收尾后内容完整", form.LogTextLengthForBenchmark.ToString(), chunkText.Length.ToString());
+                form.RenderLogForTest("");
+                Application.DoEvents();
+
                 form.AppendLogForTest(string.Join("\r\n", Enumerable.Range(0, 200).Select(i => "test line " + i)));
                 recv.SelectionStart = recv.TextLength;
                 recv.SelectionLength = 0;

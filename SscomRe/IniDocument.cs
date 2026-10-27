@@ -311,10 +311,12 @@ public static class IniDocument
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) ? n : fallback;
 
     private static string Esc(string s) =>
-        s.Replace(",", "0x02").Replace("\r", "0x03").Replace("\n", "0x04");
+        s.Replace("\u0002", "0x02").Replace("\u0003", "0x03").Replace("\u0004", "0x04")
+            .Replace(",", "0x02").Replace("\r", "0x03").Replace("\n", "0x04");
 
     private static string Unesc(string s) =>
-        s.Replace("0x04", "\n").Replace("0x03", "\r").Replace("0x02", ",");
+        s.Replace("0x04", "\n").Replace("0x03", "\r").Replace("0x02", ",")
+            .Replace("\u0004", "\n").Replace("\u0003", "\r").Replace("\u0002", ",");
 
     private static Encoding CreateGbk() => Encoding.GetEncoding(936);
 }

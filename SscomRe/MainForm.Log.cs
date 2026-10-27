@@ -182,12 +182,19 @@ public sealed partial class MainForm
 
     private void RenderLogChunk(int token)
     {
-        if (token != _renderToken || IsDisposed || !_recvBox.IsHandleCreated) return;
+        if (!RenderLogChunkOnce(token)) return;
+        BeginInvoke(new Action(() => RenderLogChunk(token)));
+    }
+
+    /// <summary>处理一块；返回 true 表示还有下一块。同步收尾和异步分块共用这段。</summary>
+    private bool RenderLogChunkOnce(int token)
+    {
+        if (!_renderBusy || token != _renderToken || IsDisposed || !_recvBox.IsHandleCreated) return false;
         string? text = _renderText;
         if (text is null)
         {
             FinishRenderLog();
-            return;
+            return false;
         }
         int end = NextRenderChunkEnd(text, _renderOffset);
         string chunk = text.Substring(_renderOffset, end - _renderOffset);
@@ -201,10 +208,20 @@ public sealed partial class MainForm
             CancelRenderLog();
             throw;
         }
-        if (_renderOffset < text.Length)
-            BeginInvoke(new Action(() => RenderLogChunk(token)));
-        else
-            FinishRenderLog();
+        if (_renderOffset < text.Length) return true;
+        FinishRenderLog();
+        return false;
+    }
+
+    /// <summary>保存/复制/搜索前调用：把剩余分块在当前 UI 事件内画完，避免读到半屏日志。</summary>
+    private void CompletePendingRenderLog()
+    {
+        if (!_renderBusy) return;
+        int token = _renderToken;
+        while (_renderBusy && token == _renderToken)
+        {
+            if (!RenderLogChunkOnce(token)) break;
+        }
     }
 
     /// <summary>优先在换行处切块；单行过长（HEX 连续输出）时按字符数切，代理对不劈开。</summary>
@@ -232,7 +249,7 @@ public sealed partial class MainForm
 
         if (_autoScrollBox.Checked)
         {
-            ScrollRecvToLatest();
+            EnsureRecvAtLatest();
         }
         else
         {
@@ -269,6 +286,12 @@ public sealed partial class MainForm
         _recvBox.ScrollToCaret();
     }
 
+    /// <summary>已显示最后一行时不再重复 ScrollToCaret，避免高频接收时白做一次全文档定位。</summary>
+    private void EnsureRecvAtLatest()
+    {
+        if (!RecvAtBottom()) ScrollRecvToLatest();
+    }
+
     /// <summary>尺寸/DPI/激活变化后等一次布局完成，再保证视图在末尾。</summary>
     private void ScheduleScrollRecvToLatest()
     {
@@ -278,7 +301,7 @@ public sealed partial class MainForm
         BeginInvoke(new Action(() =>
         {
             _scrollLatestScheduled = false;
-            if (!IsDisposed && _autoScrollBox.Checked) ScrollRecvToLatest();
+            if (!IsDisposed && _autoScrollBox.Checked) EnsureRecvAtLatest();
         }));
     }
 
@@ -314,6 +337,7 @@ public sealed partial class MainForm
             HideToast();
             return;
         }
+        CompletePendingRenderLog();            // 分块重画期间控件里只有部分日志
         ClearSearchHighlight();
         RichTextBoxFinds options = forward ? RichTextBoxFinds.None : RichTextBoxFinds.Reverse;
         int start = forward
@@ -356,6 +380,7 @@ public sealed partial class MainForm
 
     private void CopyPlainLog()
     {
+        CompletePendingRenderLog();
         string text = _recvBox.SelectionLength > 0 ? _recvBox.SelectedText : _recvBox.Text;
         try
         {
@@ -399,11 +424,19 @@ public sealed partial class MainForm
     {
         var menu = new ContextMenuStrip();
         var copy = new ToolStripMenuItem("复制");
-        copy.Click += (_, _) => _recvBox.Copy();
+        copy.Click += (_, _) =>
+        {
+            CompletePendingRenderLog();
+            _recvBox.Copy();
+        };
         var plain = new ToolStripMenuItem("复制纯数据（去掉时间戳和收/发标记）");
         plain.Click += (_, _) => CopyPlainLog();
         var all = new ToolStripMenuItem("全选");
-        all.Click += (_, _) => _recvBox.SelectAll();
+        all.Click += (_, _) =>
+        {
+            CompletePendingRenderLog();
+            _recvBox.SelectAll();
+        };
         var clear = new ToolStripMenuItem("清除窗口");
         clear.Click += (_, _) => ClearReceive();
         menu.Items.AddRange(new ToolStripItem[] { copy, plain, new ToolStripSeparator(), all, clear });
@@ -451,6 +484,9 @@ public sealed partial class MainForm
     internal int LogTextLengthForBenchmark => _recvBox.TextLength;
     internal bool RecvAtBottomForTest() => RecvAtBottom();
     internal void AppendLogForTest(string text) => AppendRecv(text);
+    internal void RenderLogForTest(string text) => RenderLogFromText(text);
+    internal bool RenderLogBusyForTest => _renderBusy;
+    internal void CompletePendingRenderLogForTest() => CompletePendingRenderLog();
     internal bool AutoScrollEnabledForTest => _autoScrollBox?.Checked == true;
     internal void SetAutoScrollForTest(bool enabled) => _autoScrollBox.Checked = enabled;
 
