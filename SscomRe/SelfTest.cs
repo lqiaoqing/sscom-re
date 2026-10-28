@@ -822,7 +822,11 @@ internal static class SelfTest
             string rmc = WithCs("GNRMC,082105.00,A,3113.82496,N,12128.42206,E,0.81,186.2,271026,,,A");
             string gga = WithCs("GNGGA,082105.00,3113.82496,N,12128.42206,E,1,14,0.8,12.4,M,0.0,M,,");
             string gsa = WithCs("GNGSA,A,3,,,,,,,,,,,,,1.2,0.8,0.9");
-            string rtk = WithCs("GNGGA,082106.00,3113.82496,N,12128.42206,E,4,18,0.6,12.4,M,0.0,M,,");
+            string rtk = WithCs("GNGGA,082106.00,3113.82496,N,12128.42206,E,4,18,0.6,12.4,M,-2.1,M,0.8,0032");
+            string gpgsv = WithCs("GPGSV,2,1,08,12,68,214,46,15,54,301,41,24,62,132,44,19,47,088,38");
+            string bdgsv = WithCs("BDGSV,2,1,08,24,61,132,44,07,31,176,27,09,22,046,21,11,12,310,18");
+            string gagsv = WithCs("GAGSV,1,1,04,19,47,088,38");
+            string glgsv = WithCs("GLGSV,1,1,03,09,39,250,32");
             var parser = new NmeaParser();
             byte[] first = Ascii(rmc);
             var head = new byte[8];
@@ -844,8 +848,42 @@ internal static class SelfTest
             CheckText("NMEA 海拔", fix.AltitudeMeters is double alt && Math.Abs(alt - 12.4) < 0.001 ? "yes" : "no", "yes");
             CheckText("NMEA 质量 3D", fix.Quality, "3D");
             CheckText("NMEA 时间", fix.FormatUtc(), "08:21:05 UTC");
+            CheckText("NMEA DOP",
+                (fix.Pdop is double pd && Math.Abs(pd - 1.2) < 0.001 ? "1.2" : "?") + "/" +
+                (fix.Hdop is double hd && Math.Abs(hd - 0.8) < 0.001 ? "0.8" : "?") + "/" +
+                (fix.Vdop is double vd && Math.Abs(vd - 0.9) < 0.001 ? "0.9" : "?"),
+                "1.2/0.8/0.9");
             parser.Push(Ascii(rtk));
-            CheckText("NMEA 质量 RTK", parser.Snapshot().Quality, "RTK固定");
+            fix = parser.Snapshot();
+            CheckText("NMEA 质量 RTK", fix.Quality, "RTK固定");
+            CheckText("NMEA 质量显示", fix.FormatQuality(), "RTK 固定解");
+            CheckText("NMEA 大地水准面",
+                fix.GeoidSeparationMeters is double geoid && Math.Abs(geoid + 2.1) < 0.001 ? "yes" : "no", "yes");
+            CheckText("NMEA 差分龄期",
+                fix.DifferentialAgeSeconds is double diff && Math.Abs(diff - 0.8) < 0.001 ? "yes" : "no", "yes");
+            CheckText("NMEA 基准站", fix.BaseStationId, "0032");
+            CheckText("NMEA 纬度 DMS", fix.FormatLatitudeDms(), "31° 13′ 49.50″ N");
+            CheckText("NMEA 航向方位", fix.FormatCourseCardinal(), "南");
+            CheckText("NMEA 速度节", fix.FormatSpeedKnots(), "0.8 kn");
+
+            parser.Push(Ascii(gpgsv + bdgsv + gagsv + glgsv));
+            fix = parser.Snapshot();
+            CheckText("GSV 可见卫星", fix.VisibleSatellites.ToString(), "23");
+            CheckText("GSV 卫星明细", fix.SatellitesInView.Count.ToString(), "10");
+            CheckText("GSV 按 SNR 降序",
+                string.Join(",", fix.SatellitesInView.Take(6).Select(sat => sat.Snr?.ToString() ?? "-")),
+                "46,44,44,41,38,38");
+            CheckText("GSV 星座代码",
+                fix.SatellitesInView[0].Code == "G" &&
+                fix.SatellitesInView.Take(6).Any(sat => sat.Code == "C") &&
+                fix.SatellitesInView.Take(6).Any(sat => sat.Code == "E") ? "yes" : "no", "yes");
+            CheckText("GSV 仰角方位",
+                fix.SatellitesInView[0].Elevation + "/" + fix.SatellitesInView[0].Azimuth, "68/214");
+            var qzss = new NmeaParser();
+            qzss.Push(Ascii(WithCs("GPGSV,1,1,01,194,45,120,40")));
+            GnssFix qzssFix = qzss.Snapshot();
+            CheckText("GSV QZSS 识别", qzssFix.SatellitesInView[0].Code, "J");
+            CheckText("GSV QZSS 名称", qzssFix.SatellitesInView[0].DisplayName, "QZSS");
             double kept = parser.Snapshot().Latitude;
             parser.Push(Ascii("$GNRMC,082107.00,A,0000.00000,N,00000.00000,E,0.1,1.0,271026,,,A*00\r\n"));
             fix = parser.Snapshot();
@@ -1270,7 +1308,7 @@ internal static class SelfTest
             }
 
             CheckText("保存下拉三项", string.Join("|", form.SaveMenuTextsForTest),
-                "保存数据（TXT + DAT）|另存为带颜色日志（RTF）...|另存为带颜色日志（HTML）...");
+                "保存数据（TXT + DAT，选目录）|另存为带颜色日志（RTF）...|另存为带颜色日志（HTML）...");
 
             form.SetHighlightRulesForTest(LogHighlightRuleStore.CreateDefaults(Theme.IsLight));
             form.RenderLogForTest("[10:00:00.000]收←◆ ERROR value <1> & ok");
@@ -1429,13 +1467,26 @@ internal static class SelfTest
             form.OpenGnssForTest();
             Application.DoEvents();
             CheckText("GNSS 小窗可打开", form.GnssOpenForTest ? "yes" : "no", "yes");
-            CheckText("GNSS 窗口标题", form.GnssTitleForTest, "GNSS");
+            CheckText("GNSS 窗口标题", form.GnssTitleForTest, "GNSS 定位");
             CheckText("打开 GNSS 开始解析", form.GnssParsingForTest ? "yes" : "no", "yes");
-            int cs = 0;
-            const string body = "GNRMC,082105.00,A,3113.82496,N,12128.42206,E,0.81,186.2,271026,,,A";
-            foreach (char ch in body) cs ^= ch;
-            form.FeedGnssForTest(System.Text.Encoding.ASCII.GetBytes("$" + body + "*" + cs.ToString("X2") + "\r\n"));
+            void Feed(string sentence)
+            {
+                int check = 0;
+                foreach (char ch in sentence) check ^= ch;
+                form.FeedGnssForTest(System.Text.Encoding.ASCII.GetBytes(
+                    "$" + sentence + "*" + check.ToString("X2") + "\r\n"));
+            }
+            const string rmcBody = "GNRMC,082105.00,A,3113.82496,N,12128.42206,E,0.81,186.2,271026,,,A";
+            Feed(rmcBody);
             CheckText("GNSS 小窗显示纬度", form.GnssSummaryForTest.Contains("31.230416° N") ? "yes" : form.GnssSummaryForTest, "yes");
+            Feed("GNGGA,082105.00,3113.82496,N,12128.42206,E,4,18,0.6,12.4,M,-2.1,M,0.8,0032");
+            Feed("GNGSA,A,3,,,,,,,,,,,,,1.2,0.8,0.9");
+            Feed("GPGSV,2,1,08,12,68,214,46,15,54,301,41,24,62,132,44,19,47,088,38");
+            Feed("BDGSV,2,1,08,24,61,132,44,07,31,176,27,09,22,046,21,11,12,310,18");
+            Feed("GAGSV,1,1,04,19,47,088,38");
+            Feed("GLGSV,1,1,03,09,39,250,32");
+            CheckText("GNSS 小窗显示卫星", form.GnssSummaryForTest.Contains("G12:46") ? "yes" : form.GnssSummaryForTest, "yes");
+            CheckText("GNSS 小窗可见卫星数", form.GnssSummaryForTest.Contains("|23|") ? "yes" : form.GnssSummaryForTest, "yes");
             form.CloseGnssForTest();
             Application.DoEvents();
             CheckText("关闭 GNSS 停止解析", form.GnssParsingForTest ? "yes" : "no", "no");
@@ -1453,7 +1504,7 @@ internal static class SelfTest
                 if (c is CheckBox { Text: "自动滚动" } box) autoScroll = box;
                 if (c is Button { Text: "暂停显示" } pause) pauseDisplay = pause;
                 if (c is Button { Text: "清除窗口" } clear) clearWindow = clear;
-                if (c is Button { Text: "保存数据" } save) saveData = save;
+                if (c is Button { Text: "保存数据 ▾" } save) saveData = save;
             }
             bool SameRow(Control? a, Control? b) =>
                 a is not null && b is not null &&

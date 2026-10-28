@@ -606,7 +606,7 @@ public sealed partial class MainForm
     private ContextMenuStrip BuildSaveMenu()
     {
         var menu = new ContextMenuStrip();
-        var data = new ToolStripMenuItem("保存数据（TXT + DAT）");
+        var data = new ToolStripMenuItem("保存数据（TXT + DAT，选目录）");
         data.Click += (_, _) => SaveData();
         var rtf = new ToolStripMenuItem("另存为带颜色日志（RTF）...");
         rtf.Click += (_, _) => SaveColoredLogRtf();
@@ -615,6 +615,11 @@ public sealed partial class MainForm
         menu.Items.AddRange(new ToolStripItem[] { data, new ToolStripSeparator(), rtf, html });
         Theme.StyleContextMenu(menu);
         return menu;
+    }
+
+    private void ShowSaveMenu(Control anchor)
+    {
+        _saveMenu.Show(anchor, new Point(0, anchor.Height));
     }
 
     internal IReadOnlyList<string> SaveMenuTextsForTest =>

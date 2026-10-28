@@ -352,7 +352,7 @@ public sealed partial class MainForm : Form
         get
         {
             Version? version = typeof(MainForm).Assembly.GetName().Version;
-            return version is null ? "1.3.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+            return version is null ? "1.4.0" : $"{version.Major}.{version.Minor}.{version.Build}";
         }
     }
 
@@ -657,13 +657,13 @@ public sealed partial class MainForm : Form
         clearWindow.Margin = rowMargin;
         var saveData = new ThemeButton
         {
-            Text = "保存数据",
+            Text = "保存数据 ▾",
             AutoSize = true,
             Compact = true,
             Kind = ThemeButton.ButtonKind.Soft,
         };
-        saveData.Click += (_, _) => SaveData();
-        _rowTip.SetToolTip(saveData, "选择目录后保存原始数据和窗口内容");
+        saveData.Click += (_, _) => ShowSaveMenu(saveData);
+        _rowTip.SetToolTip(saveData, "保存数据（TXT + DAT），或另存为带颜色日志（RTF / HTML）");
         Put(row, saveData);
         saveData.Margin = rowMargin;
         SyncDisplayPauseButton();

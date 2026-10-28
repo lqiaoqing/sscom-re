@@ -7,6 +7,9 @@
 *.sln.docstates
 .vs/
 
+# Local runtime config
+/sscom51.ini
+
 # NuGet
 *.nupkg
 **/packages/

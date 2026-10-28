@@ -11,6 +11,34 @@ internal enum GnssView
     Invalid,
 }
 
+/// <summary>GSV 里的一颗卫星；仰角/方位/信噪比缺失时为 null。</summary>
+internal readonly record struct GnssSatellite(string Constellation, int Prn, int? Elevation, int? Azimuth, int? Snr)
+{
+    public string Code => Constellation switch
+    {
+        "GPS" => "G",
+        "BeiDou" => "C",
+        "Galileo" => "E",
+        "GLONASS" => "R",
+        "QZSS" => "J",
+        "NavIC" => "I",
+        "SBAS" => "S",
+        _ => "M",
+    };
+
+    public string DisplayName => Constellation switch
+    {
+        "GPS" => "GPS",
+        "BeiDou" => "北斗",
+        "Galileo" => "Galileo",
+        "GLONASS" => "GLONASS",
+        "QZSS" => "QZSS",
+        "NavIC" => "NavIC",
+        "SBAS" => "SBAS",
+        _ => "GNSS",
+    };
+}
+
 /// <summary>实时定位卡片用的一帧快照。坐标是十进制度，速度已换成 km/h。</summary>
 internal readonly record struct GnssFix
 {
@@ -19,10 +47,17 @@ internal readonly record struct GnssFix
     public double Latitude { get; init; }
     public double Longitude { get; init; }
     public double? AltitudeMeters { get; init; }
+    public double? GeoidSeparationMeters { get; init; }
     public double? SpeedKmh { get; init; }
     public double? CourseDegrees { get; init; }
     public int? Satellites { get; init; }
     public double? Hdop { get; init; }
+    public double? Pdop { get; init; }
+    public double? Vdop { get; init; }
+    public double? DifferentialAgeSeconds { get; init; }
+    public string BaseStationId { get; init; } = "";
+    public int VisibleSatellites { get; init; }
+    public IReadOnlyList<GnssSatellite> SatellitesInView { get; init; } = Array.Empty<GnssSatellite>();
     public string GgaQuality { get; init; }
     public string GsaQuality { get; init; }
     public string Talker { get; init; }
@@ -31,6 +66,16 @@ internal readonly record struct GnssFix
     public long UpdatedTick { get; init; }
     public long SentenceTick { get; init; }
     public int UtcSecondsOfDay { get; init; }
+
+    public GnssFix()
+    {
+        GgaQuality = "";
+        GsaQuality = "";
+        Talker = "";
+        Source = "";
+        BaseStationId = "";
+        SatellitesInView = Array.Empty<GnssSatellite>();
+    }
 
     public string Quality => Rank(GgaQuality) >= Rank(GsaQuality) ? GgaQuality : GsaQuality;
 
@@ -48,15 +93,47 @@ internal readonly record struct GnssFix
 
     public string FormatLatitude() => FormatAngle(Latitude, 'N', 'S');
     public string FormatLongitude() => FormatAngle(Longitude, 'E', 'W');
+    public string FormatLatitudeDms() => FormatDms(Latitude, 'N', 'S');
+    public string FormatLongitudeDms() => FormatDms(Longitude, 'E', 'W');
 
     public string FormatAltitude() =>
         AltitudeMeters is double v ? v.ToString("0.0", CultureInfo.InvariantCulture) + " m" : "—";
 
+    public string FormatGeoid() =>
+        GeoidSeparationMeters is double v ? v.ToString("0.0", CultureInfo.InvariantCulture) + " m" : "—";
+
     public string FormatSpeed() =>
         SpeedKmh is double v ? v.ToString("0.0", CultureInfo.InvariantCulture) + " km/h" : "—";
 
+    public string FormatSpeedKnots() =>
+        SpeedKmh is double v ? (v / 1.852).ToString("0.0", CultureInfo.InvariantCulture) + " kn" : "—";
+
     public string FormatCourse() =>
         CourseDegrees is double v ? Math.Round(v).ToString("0", CultureInfo.InvariantCulture) + "°" : "—";
+
+    public string FormatCourseCardinal() => CourseDegrees is double v
+        ? new[] { "北", "东北", "东", "东南", "南", "西南", "西", "西北" }[
+            (int)Math.Round(((v % 360) + 360) % 360 / 45.0) % 8]
+        : "—";
+
+    public string FormatDiffAge() =>
+        DifferentialAgeSeconds is double v ? v.ToString("0.0", CultureInfo.InvariantCulture) + " s" : "—";
+
+    public string FormatBaseStation() => BaseStationId.Length > 0 ? "基准 " + BaseStationId : "基准 —";
+
+    public string FormatHdop() => Hdop is double v ? "HDOP " + v.ToString("0.0#", CultureInfo.InvariantCulture) : "HDOP —";
+    public string FormatVdop() => Vdop is double v ? "VDOP " + v.ToString("0.0#", CultureInfo.InvariantCulture) : "VDOP —";
+    public string FormatPdop() => Pdop is double v ? "PDOP " + v.ToString("0.0#", CultureInfo.InvariantCulture) : "PDOP —";
+
+    public string FormatQuality() => Quality switch
+    {
+        "RTK固定" => "RTK 固定解",
+        "RTK浮动" => "RTK 浮动解",
+        "DGPS" => "DGPS",
+        "3D" => "3D 定位",
+        "2D" => "2D 定位",
+        _ => "",
+    };
 
     public string FormatUtc()
     {
@@ -65,6 +142,15 @@ internal readonly record struct GnssFix
         int m = UtcSecondsOfDay % 3600 / 60;
         int s = UtcSecondsOfDay % 60;
         return $"{h:00}:{m:00}:{s:00} UTC";
+    }
+
+    public string FormatLocalTime()
+    {
+        if (UtcSecondsOfDay < 0) return "";
+        int offset = (int)TimeZoneInfo.Local.GetUtcOffset(DateTime.Now).TotalSeconds;
+        int seconds = (UtcSecondsOfDay + offset) % 86400;
+        if (seconds < 0) seconds += 86400;
+        return $"{seconds / 3600:00}:{seconds % 3600 / 60:00}:{seconds % 60:00}";
     }
 
     public string FormatAge(long nowTick)
@@ -83,6 +169,27 @@ internal readonly record struct GnssFix
         char hemi = value >= 0 ? positive : negative;
         string number = Math.Abs(value).ToString("0.000000", CultureInfo.InvariantCulture);
         return number + "° " + hemi;
+    }
+
+    private static string FormatDms(double value, char positive, char negative)
+    {
+        char hemi = value >= 0 ? positive : negative;
+        double abs = Math.Abs(value);
+        int degrees = (int)abs;
+        double minutesFull = (abs - degrees) * 60;
+        int minutes = (int)minutesFull;
+        double seconds = Math.Round((minutesFull - minutes) * 60, 2);
+        if (seconds >= 60)
+        {
+            seconds = 0;
+            minutes++;
+        }
+        if (minutes >= 60)
+        {
+            minutes = 0;
+            degrees++;
+        }
+        return $"{degrees}° {minutes:00}′ {seconds:00.00}″ {hemi}";
     }
 
     private static int Rank(string quality) => quality switch
@@ -105,12 +212,25 @@ internal sealed class NmeaParser
     private const int MaxSentence = 256;
     private readonly object _gate = new();
     private readonly StringBuilder _buf = new();
+    private readonly Dictionary<(string Constellation, int Prn), (GnssSatellite Satellite, long SeenTick)> _satellites = new();
+    private readonly Dictionary<string, int> _visibleTotals = new();
+    private readonly Dictionary<string, long> _constellationSeen = new();
+    private static readonly long SatelliteTtlTicks = Stopwatch.Frequency * 6;
     private bool _collecting;
     private GnssFix _fix = GnssFix.Waiting;
 
     public GnssFix Snapshot()
     {
-        lock (_gate) return _fix;
+        lock (_gate)
+        {
+            PruneSatellites(Stopwatch.GetTimestamp());
+            _fix = _fix with
+            {
+                SatellitesInView = SatelliteSnapshot(),
+                VisibleSatellites = VisibleCount(),
+            };
+            return _fix;
+        }
     }
 
     public void Reset()
@@ -119,6 +239,9 @@ internal sealed class NmeaParser
         {
             _buf.Clear();
             _collecting = false;
+            _satellites.Clear();
+            _visibleTotals.Clear();
+            _constellationSeen.Clear();
             _fix = GnssFix.Waiting;
         }
     }
@@ -200,6 +323,7 @@ internal sealed class NmeaParser
             case "GNS": ApplyGns(ref next, parts, now); break;
             case "VTG": ApplyVtg(ref next, parts); break;
             case "GSA": ApplyGsa(ref next, parts); break;
+            case "GSV": ApplyGsv(ref next, parts, talker, now); break;
             case "ZDA": ApplyTime(ref next, Field(parts, 1)); break;
             default: break;
         }
@@ -251,6 +375,13 @@ internal sealed class NmeaParser
             fix = fix with { Hdop = hdop };
         if (TryDouble(Field(parts, 9), out double alt))
             fix = fix with { AltitudeMeters = alt };
+        if (TryDouble(Field(parts, 11), out double geoid))
+            fix = fix with { GeoidSeparationMeters = geoid };
+        if (TryDouble(Field(parts, 13), out double diffAge))
+            fix = fix with { DifferentialAgeSeconds = diffAge };
+        string baseId = Field(parts, 14);
+        if (baseId.Length > 0)
+            fix = fix with { BaseStationId = baseId };
         fix = fix with { GgaQuality = quality };
         if (!moved) return;
         fix = fix with
@@ -338,9 +469,97 @@ internal sealed class NmeaParser
             _ => "",
         };
         fix = fix with { GsaQuality = dimensional };
-        if (parts.Length > 16 && TryDouble(parts[16], out double hdop))
+        if (TryDouble(Field(parts, 15), out double pdop))
+            fix = fix with { Pdop = pdop };
+        if (TryDouble(Field(parts, 16), out double hdop))
             fix = fix with { Hdop = hdop };
+        if (TryDouble(Field(parts, 17), out double vdop))
+            fix = fix with { Vdop = vdop };
     }
+
+    private void ApplyGsv(ref GnssFix fix, string[] parts, string talker, long now)
+    {
+        string constellation = ConstellationFromTalker(talker);
+        if (int.TryParse(Field(parts, 3), NumberStyles.Integer, CultureInfo.InvariantCulture, out int total))
+            _visibleTotals[constellation] = total;
+        _constellationSeen[constellation] = now;
+
+        for (int i = 4; i + 3 < parts.Length; i += 4)
+        {
+            if (!int.TryParse(Field(parts, i), NumberStyles.Integer, CultureInfo.InvariantCulture, out int prn) || prn <= 0)
+                continue;
+            int? elevation = NullableInt(Field(parts, i + 1));
+            int? azimuth = NullableInt(Field(parts, i + 2));
+            int? snr = NullableInt(Field(parts, i + 3));
+            string satelliteConstellation = NormalizeConstellation(constellation, prn);
+            _satellites[(satelliteConstellation, prn)] =
+                (new GnssSatellite(satelliteConstellation, prn, elevation, azimuth, snr), now);
+        }
+
+        PruneSatellites(now);
+        fix = fix with
+        {
+            SatellitesInView = SatelliteSnapshot(),
+            VisibleSatellites = VisibleCount(),
+        };
+    }
+
+    private void PruneSatellites(long now)
+    {
+        var stale = new List<(string Constellation, int Prn)>();
+        foreach (var pair in _satellites)
+            if (now - pair.Value.SeenTick > SatelliteTtlTicks)
+                stale.Add(pair.Key);
+        foreach (var key in stale) _satellites.Remove(key);
+
+        var staleSystems = new List<string>();
+        foreach (var pair in _constellationSeen)
+            if (now - pair.Value > SatelliteTtlTicks)
+                staleSystems.Add(pair.Key);
+        foreach (string system in staleSystems)
+        {
+            _constellationSeen.Remove(system);
+            _visibleTotals.Remove(system);
+        }
+    }
+
+    private GnssSatellite[] SatelliteSnapshot() => _satellites.Values
+        .Select(pair => pair.Satellite)
+        .OrderByDescending(sat => sat.Snr ?? -1)
+        .ThenByDescending(sat => sat.Elevation ?? -1)
+        .ThenBy(sat => sat.Constellation, StringComparer.Ordinal)
+        .ThenBy(sat => sat.Prn)
+        .ToArray();
+
+    private int VisibleCount()
+    {
+        int total = 0;
+        foreach (int value in _visibleTotals.Values) total += value;
+        return Math.Max(total, _satellites.Count);
+    }
+
+    private static string ConstellationFromTalker(string talker) => talker switch
+    {
+        "GP" => "GPS",
+        "GL" => "GLONASS",
+        "GA" => "Galileo",
+        "GB" or "BD" => "BeiDou",
+        "GQ" => "QZSS",
+        "GI" => "NavIC",
+        _ => "GNSS",
+    };
+
+    /// <summary>部分接收机把 QZSS/SBAS 混在 GPGSV 里，用 PRN 区间纠正星座。</summary>
+    private static string NormalizeConstellation(string constellation, int prn)
+    {
+        if (constellation != "GPS") return constellation;
+        if (prn is >= 193 and <= 202) return "QZSS";
+        if (prn is >= 120 and <= 158) return "SBAS";
+        return constellation;
+    }
+
+    private static int? NullableInt(string text) =>
+        int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) ? value : null;
 
     private static void MarkInvalid(ref GnssFix fix, bool moved, double lat, double lon, string source)
     {

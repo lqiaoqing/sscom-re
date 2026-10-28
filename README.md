@@ -2,9 +2,9 @@
 
 按逆向整理出的行为规格，用 **C# WinForms / .NET Framework 4.8** 重写 `sscom5.13.1.exe`（Delphi/VCL 串口网络调试工具）的日常收发功能。
 
-- 当前版本：**v1.3.0**（2026-10-27）；版本记录见 [CHANGELOG.md](CHANGELOG.md)
+- 当前版本：**v1.4.0**（2026-10-28）；版本记录见 [CHANGELOG.md](CHANGELOG.md)
 - 行为唯一依据：[sscom5.13.1-rewrite-spec.md](sscom5.13.1-rewrite-spec.md)
-- 当前状态：M1–M9 全部实现；Phase 1 深/浅双主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏、Phase 3B 设置浮层、Phase 3C 日志性能/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、发送设置重排、日志自动跟随、状态栏曲线移除、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动开关、日志头端口快捷下拉、多条面板方案 02、日志高亮规则（9 条预置，错误/警告默认开启）、Ctrl+K 命令面板、带颜色日志导出（RTF / HTML）、持续 HTML 记录与 GNSS 定位小窗已落地；`--selftest` 373/373 通过
+- 当前状态：M1–M9 全部实现；Phase 1 深/浅双主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏、Phase 3B 设置浮层、Phase 3C 日志性能/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、发送设置重排、日志自动跟随、状态栏曲线移除、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动开关、日志头端口快捷下拉、多条面板方案 02、日志高亮规则（9 条预置，错误/警告默认开启）、Ctrl+K 命令面板、带颜色日志导出（RTF / HTML）、持续 HTML 记录、GNSS 定位小窗、暂停显示与按目录保存已落地；`--selftest` 411/411 通过
 - 目标系统：Windows 10/11（自带 .NET Framework 4.8）
 - 原版程序、解包镜像和反编译源码**不在本仓库中**，详见 [_analysis/README.md](_analysis/README.md)
 
@@ -36,7 +36,8 @@
 - 低频接收项收在「接收设置」浮层：时间戳/分包、超时时间、接收数据到文件、持续记录 HTML
 - 时间戳分包显示；GBK 半个汉字跨包拼接
 - 显示缓冲上限 200K / 500K / 1M / 2M / 5M；状态栏底色随接收量分档
-- 清除窗口；保存数据（原始 `SAVE*.DAT` + 窗口内容 `SaveWindows*.TXT`）
+- 清除窗口；保存数据（先选目录，写原始 `SAVE*.DAT` + 窗口内容 `SaveWindows*.TXT`，含暂停显示期间尚未画出的内容）
+- 暂停显示：只停住窗口刷新，串口/网络继续接收；恢复时补齐期间内容。暂停显示、清除窗口、保存数据与自动滚动同一行，提示挂在日志区，不挤动菜单栏
 - 接收数据到文件（按模式/端口名生成 `ReceivedTofile-*.DAT`，逐段追加）
 - 持续记录 HTML（带颜色）：目录可选、按 10/25/50/100 MB 或不分卷（默认 50 MB）自动切卷，可选浅色文档/跟随界面主题、含发送回显；每卷都是可直接用浏览器打开的完整 HTML，使用开始记录时的规则与调色板快照
 - 打开文件预览前 4000 字节；状态栏 `S:` / `R:` 计数与串口参数描述
@@ -56,7 +57,8 @@
 - 日志头的端口名（如 `COM38 ▾`）是快捷下拉：点击打开同一套端口浮层，直接切换串口/网络模式，不需要展开左栏
 - 日志高亮规则：显示菜单可管理关键字/正则规则，支持整行着色、收/发范围、颜色、优先级、JSON 导入/导出；预置 9 条通用规则（错误、警告、成功、连接状态、GPS、MQTT、AT、心跳、调试），仅「错误/警告」默认开启，其余按需打开；预览会显示匹配示例或最近日志命中，选中的关闭规则也按开启效果预览；关键字着色完全由规则驱动，关闭规则即恢复普通文字；规则写入 `N1096`，旧配置会自动补齐新预置
 - Ctrl+K 命令面板：搜索所有已保存的多条命令（含未建页），Enter 发送、Ctrl+Enter 填入发送框，最近发送优先显示；顶部工具栏有「命令面板」按钮入口
-- 日志头「保存 ▾」下拉：保留“保存数据（TXT + DAT）”原行为；新增“另存为带颜色日志”，可选 RTF（所见即所得，Word/WPS 打开）或 HTML（浏览器打开、便于分享），按当前规则重新着色后导出
+- 发送设置行「保存数据 ▾」下拉（清除窗口右侧）：保留“保存数据（TXT + DAT，先选目录）”；新增“另存为带颜色日志”，可选 RTF（所见即所得，Word/WPS 打开）或 HTML（浏览器打开、便于分享），按当前规则重新着色后导出
+- GNSS 定位小窗（工具 → GNSS）：十进制度 + DMS 坐标、海拔/水准面、速度/节、航向、HDOP/VDOP/PDOP、参与/可见卫星、差分龄期/基准站、UTC/本地时间；解析 GSV 后按 SNR 从强到弱显示前 6 颗卫星（星座、仰角/方位、信号条），卫星数据 6 秒无更新自动过期；无定位时保留上一帧。参与数来自 GGA/GNS，可见数只统计 GSV；若设备未输出全部星座的 GSV（如 QZSS/北斗），参与数可能大于 GSV 可见数，面板会标记“GSV 未覆盖全部”
 - UDP 收到数据时把发送方 IP 回填到「远程IP」
 
 ### 界面主题（Phase 1）
@@ -87,7 +89,7 @@
 - 三栏布局：左侧连接栏（端口/波特率/RTS/DTR/网络字段）、中间日志与发送区、右侧可折叠多条字符串抽屉
 - 左栏可完全隐藏，连接状态继续显示在日志头；日志头左侧 `«/»` 是唯一伸缩开关。`N1093` 记忆，窄窗自动折叠，手动操作后本次运行不再自动切换
 - 接收日志改为富文本：时间戳灰、RX 青绿、TX 琥珀、HEX 暗青；TX 行带暖色底；错误/警告等关键字颜色由高亮规则提供，关闭规则后不再自动着色
-- 日志搜索（Enter / Shift+Enter 前后查找）、暂停跟随、右键复制/复制纯数据/全选/清除
+- 日志搜索（Enter / Shift+Enter 前后查找）、暂停显示（只停刷新，串口继续接收）、右键复制/复制纯数据/全选/清除
 - 状态栏显示 RX/TX 实时速率和缓冲占用（已按要求移除速率曲线）
 - 发送区仍在底部，包含 HEX 显示/发送、加时间戳/回车、定时发送、帧首/帧尾/校验等全部原控件
 - 标题栏保留原生 DWM 深/浅方案；菜单、工具栏、连接栏和抽屉使用现有主题 token
@@ -111,9 +113,9 @@ dotnet build -c Release
 输出固定为：
 
 ```
-SscomRe/bin/net48/sscomRe_v1.3.0.exe
-SscomRe/bin/net48/sscomRe_v1.3.0.exe.config
-SscomRe/bin/net48/sscomRe_v1.3.0.pdb
+SscomRe/bin/net48/sscomRe_v1.4.0.exe
+SscomRe/bin/net48/sscomRe_v1.4.0.exe.config
+SscomRe/bin/net48/sscomRe_v1.4.0.pdb
 ```
 
 可执行文件名由 csproj 的 `AssemblyName` 指向 `sscomRe_v$(Version)`；图标为 `SscomRe/Assets/sscomRe.ico`，同时嵌入 exe 和窗口标题栏。
@@ -122,11 +124,11 @@ SscomRe/bin/net48/sscomRe_v1.3.0.pdb
 
 ## 运行
 
-双击 `sscomRe_v1.3.0.exe`，或在命令行中：
+双击 `sscomRe_v1.4.0.exe`，或在命令行中：
 
 ```bash
 cd SscomRe/bin/net48
-./sscomRe_v1.3.0.exe
+./sscomRe_v1.4.0.exe
 ```
 
 注意：`sscom51.ini` 按**当前工作目录**读写。从仓库根启动会读写根目录的 ini；从 `bin/net48` 启动会读写该目录的 ini。从资源管理器双击时当前目录就是 exe 目录，与原版行为一致。
@@ -135,10 +137,10 @@ cd SscomRe/bin/net48
 
 ```bash
 cd SscomRe/bin/net48
-./sscomRe_v1.3.0.exe --selftest
+./sscomRe_v1.4.0.exe --selftest
 ```
 
-- 当前结果：`SELFTEST pass=373 fail=0`
+- 当前结果：`SELFTEST pass=411 fail=0`
 - 覆盖组包/转义、7 种校验、接收显示与截断、多条发送状态机、ini 往返、终端按键、窗口几何、主窗体布局、设置浮层开关、搜索 toast、发送区收起/展开、自动滚动开关、日志头端口下拉、日志高亮规则、命令面板搜索等
 - 自检会临时创建主窗体并触发自动保存；开始前会备份现有 `sscom51.ini`，结束后原样恢复（没有则删除）
 - 布局检查按 `DeviceDpi` 缩放测试窗口，100%–200% 缩放下都可复现
@@ -149,9 +151,9 @@ cd SscomRe/bin/net48
 
 ```bash
 cd SscomRe/bin/net48
-./sscomRe_v1.3.0.exe --bench-log 2 30       # 2 MiB，30 KiB/块，文本显示
-./sscomRe_v1.3.0.exe --bench-log 1 30 --hex # HEX 显示
-./sscomRe_v1.3.0.exe --bench-log 1 30 --shot bench.png  # 额外保存一张分色日志截图
+./sscomRe_v1.4.0.exe --bench-log 2 30       # 2 MiB，30 KiB/块，文本显示
+./sscomRe_v1.4.0.exe --bench-log 1 30 --hex # HEX 显示
+./sscomRe_v1.4.0.exe --bench-log 1 30 --shot bench.png  # 额外保存一张分色日志截图
 ```
 
 压测走真实窗体的 `HandleIncoming → DrainDisplay → RTF 插入` 路径，统计每块的平均/最大界面耗时；默认目标为 30 KiB/块，对应 1 MiB/s 接收：
@@ -165,7 +167,7 @@ cd SscomRe/bin/net48
 目标机只需 Windows 10/11 自带的 .NET Framework 4.8：
 
 1. `dotnet build -c Release`
-2. 拷贝 `sscomRe_v1.3.0.exe` 和 `sscomRe_v1.3.0.exe.config` 到目标目录
+2. 拷贝 `sscomRe_v1.4.0.exe` 和 `sscomRe_v1.4.0.exe.config` 到目标目录
 3. 在该目录运行（ini 与保存/接收文件都写在运行目录）
 
 不需要安装 .NET 运行时，也不提供单文件发布。
@@ -211,6 +213,7 @@ SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
   IniDocument.cs              sscom51.ini 读写
   PortSettingsDialog.cs       更多串口设置
   WindowPlacement.cs          窗口几何夹取
+  SaveDataDialog.cs           保存数据前选择目录
   InputNormalizer.cs          行内数字框归一化
   SelfTest.cs                 --selftest 用例
 ```
@@ -226,7 +229,7 @@ SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
 - `N1080` 的 `1` 和 `2` 都映射为 TCPClient（照规格原文的怪癖）
 - 界面按物理像素布局、字体按 DPI 渲染。最小窗口随 DPI 放大，但不超过屏幕工作区
 - 标题栏使用原生 DWM 深/浅方案（保证拖动/吸附/最大化稳定）；完全自绘标题栏不在本期
-- 接收/发送低频项已收进设置浮层；侧栏、发送区、右抽屉均改为即时显隐；搜索无结果、清除和复制有 toast。保存数据的成功/失败仍按规格使用模态弹窗
+- 接收/发送低频项已收进设置浮层；侧栏、发送区、右抽屉均改为即时显隐；搜索无结果、清除和复制有 toast。保存目录选择、保存成功/失败仍按规格使用模态弹窗
 - 文本日志 1 MiB/s 压测平均 15.8ms/30KiB；HEX 显示约 52ms，1 MiB/s 下可能掉帧（原始缓冲与计数不受影响）
 - 100%/150% DPI 尚未单独截图回归；已核对 125%/200% 窗口和 192 DPI 自检
 - 本机 COM38/COM39 只做了接收与换口冒烟；DTR/RTS、发送文件、定时发送及真实网口仍需在目标硬件复验
@@ -236,7 +239,7 @@ SscomRe/                      工程源码（.NET Framework 4.8 WinForms）
 
 ## 故障排查
 
-- **编译报 `MSB3027` / 文件被锁定**：`sscomRe_v1.3.0.exe` 正在运行，关闭窗口后重编，不要用 `-o` 换输出目录
+- **编译报 `MSB3027` / 文件被锁定**：`sscomRe_v1.4.0.exe` 正在运行，关闭窗口后重编，不要用 `-o` 换输出目录
 - **启动即闪退**：查看 exe 同目录的 `crash.log`
 - **端口下拉只有 TCPClient**：本机没有枚举到串口；按规格自动切到 TCP 客户端，插好设备后点「通讯端口 → 刷新串口列表」
 - **保存参数失败**：确认 exe 所在目录（或当前工作目录）可写，检查 `sscom51.ini`

@@ -1,8 +1,8 @@
 # 交接文档：sscomRe（串口/网络数据调试器 定制版）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前版本 **v1.3.0**（2026-10-27），版本记录见 [CHANGELOG.md](CHANGELOG.md)。
-> 当前状态（2026-10-27）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏 + 日志头伸缩开关、Phase 3B 设置浮层、Phase 3C RTF 日志性能/即时面板/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、日志自动跟随、发送设置重排、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动始终跟随、日志头端口快捷下拉、多条面板方案 02、日志高亮规则（9 条预置，错误/警告默认开启，可预览）与 Ctrl+K 命令面板（工具栏按钮入口）、带颜色日志导出、持续 HTML 记录与 GNSS 定位小窗已落地；`--selftest` 373/373 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前版本 **v1.4.0**（2026-10-28），版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态（2026-10-28）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏 + 日志头伸缩开关、Phase 3B 设置浮层、Phase 3C RTF 日志性能/即时面板/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、日志自动跟随、发送设置重排、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动始终跟随、日志头端口快捷下拉、多条面板方案 02、日志高亮规则（9 条预置，错误/警告默认开启，可预览）与 Ctrl+K 命令面板（工具栏按钮入口）、带颜色日志导出、持续 HTML 记录、GNSS 增强面板、暂停显示与按目录保存已落地；`--selftest` 411/411 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -60,6 +60,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   IniDocument.cs        sscom51.ini 读写（1–3 页最多 297 行 + 设置键）
   PortSettingsDialog.cs 自建「更多串口设置」对话框
   WindowPlacement.cs    N1082–N1085 窗口几何夹取
+  SaveDataDialog.cs     保存数据前选择目录
   InputNormalizer.cs    行内数字框归一化（光标规则）
   LogPortPicker.cs      日志头端口快捷下拉（复用端口浮层）
   ThemeSwitch.cs        开关式复选框（循环发送）
@@ -67,11 +68,11 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   HighlightRulesDialog.cs 高亮规则管理（整行着色、导入/导出）
   LogExport.cs          带颜色日志导出（RTF / HTML）
   HtmlLogRecorder.cs    持续 HTML 记录（分卷/追加/快照规则）
-  NmeaParser.cs         NMEA 0183 拼句与定位快照（纯逻辑）
-  GnssWindow.cs         工具菜单 GNSS 可拖动定位小窗
+  NmeaParser.cs         NMEA 0183 拼句、定位/GSV 卫星快照（纯逻辑）
+  GnssWindow.cs         GNSS 增强面板（坐标/精度/前6卫星）
   MainForm.Gnss.cs      GNSS 菜单、解析开关与小窗生命周期
   CommandPalette.cs     Ctrl+K 已保存命令面板
-  SelfTest.cs           --selftest 用例（当前 373 项）
+  SelfTest.cs           --selftest 用例（当前 411 项）
 ```
 
 ---
@@ -98,7 +99,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `sscomRe_v1.3.0.exe --selftest` → `pass=373 fail=0`
+- `sscomRe_v1.4.0.exe --selftest` → `pass=411 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境有 COM38/COM39，只做了接收、换口和侧栏伸缩冒烟；DTR/RTS、发送文件、定时发送与真实网口仍需在目标硬件复验
 
@@ -109,23 +110,23 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 ```bash
 cd SscomRe
 dotnet build -c Release
-# 输出固定为 SscomRe/bin/net48/sscomRe_v1.3.0.exe（csproj 固定 OutputPath + AssemblyName）
+# 输出固定为 SscomRe/bin/net48/sscomRe_v1.4.0.exe（csproj 固定 OutputPath + AssemblyName）
 
 cd bin/net48
-./sscomRe_v1.3.0.exe --selftest          # 必须 pass=373 fail=0
-./sscomRe_v1.3.0.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
+./sscomRe_v1.4.0.exe --selftest          # 必须 pass=411 fail=0
+./sscomRe_v1.4.0.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
 
 # 冒烟：跑 ≥5 秒，检查没崩
 rm -f crash.log
-(./sscomRe_v1.3.0.exe &) && sleep 5
+(./sscomRe_v1.4.0.exe &) && sleep 5
 ls crash.log && echo "崩了，看日志" || echo "正常"
-taskkill //IM sscomRe_v1.3.0.exe //F
+taskkill //IM sscomRe_v1.4.0.exe //F
 ```
 
 **约定：**
 
 - `sscom51.ini` 按**当前工作目录**读写；自检和冒烟务必在 `bin/net48` 下启动。自检会自动备份/恢复现有 ini，避免测试字体、模式、窗口几何污染用户配置。
-- 不要杀用户正在用的窗口；编译报 `MSB3027/文件被锁定` 说明 `bin/net48/sscomRe_v1.3.0.exe` 正在运行，先关闭再编译，不要用 `-o` 另开目录。
+- 不要杀用户正在用的窗口；编译报 `MSB3027/文件被锁定` 说明 `bin/net48/sscomRe_v1.4.0.exe` 正在运行，先关闭再编译，不要用 `-o` 另开目录。
 - 任何未处理异常都会写 exe 同目录的 `crash.log`，先看它。
 - 新增逻辑尽量抽成**纯类**（如 `Checksums`、`TerminalInput`、`MultiSendPlanner`）并在 `--selftest` 加用例；网络类可写本机回环测试。
 - 每次改动跑：build → selftest → 5 秒冒烟，三步都过再汇报。
@@ -177,7 +178,7 @@ taskkill //IM sscomRe_v1.3.0.exe //F
 - 根布局 4 行：工具栏 / 三栏主体（`_bodyLayout` = 左 `_sidePanel` + 右 `_split`）/ 进度条 / 状态栏。旧底部 2×4 网格、`_bottomGrid`、`_serialRows`/`_netRows` 已删除，不要再加回来。
 - 左栏：竖排连接栏，`SidebarWidth() = max(240, Theme.Scale(this,280))`；串口和网络字段分别是 `_serialSection`/`_netSection`，由 `UpdateModePanels` 显隐。端口选择由自绘 `PortField` + `PortPopup` 显示，`_portCombo` 只作为隐藏数据模型（Items/Text/SelectedIndex），不参与绘制；收起时列宽归 0 且 `_sidePanel.Visible=false`，不保留 rail。端口字段显示名称 + 弱化描述，浮层串口分组带描述、网络模式在底部；F2 手动输入。刷新按钮在「连接 串口」标题行右侧，端口/波特率字段等宽，RTS/DTR 为等宽胶囊，状态卡独立显示已打开/线路参数。
 - 中心：`_split.Panel1` 内是日志头 + 富文本日志 + composer；`_split.Panel2` 是多条抽屉。默认抽屉宽约 340 逻辑像素，用户拖动后记录宽；N1086 旧值 480–580 仍按旧固定宽处理。
-- 工具栏：打开文件 + 路径框（`WrapRowPanel.StretchControl` 填满中段）+ 右 发送文件/停止/清发送区/最前/保存参数/扩展；清除窗口和保存数据移到日志头。发送区收起按钮在 composer 设置行最右侧。
+- 工具栏：打开文件 + 路径框（`WrapRowPanel.StretchControl` 填满中段）+ 右 发送文件/停止/清发送区/最前/保存参数/扩展；清除窗口、暂停显示和保存数据在发送区设置行（与自动滚动同一行）。发送区收起按钮在 composer 设置行最右侧。
 - composer：`_settingsRow1`（HEX显示/HEX发送/定时发送/加回车换行 + 右侧「接收设置/发送设置/━」）+ `_sendArea`；低频项在 `_recvSettingsFlyout`/`_sendSettingsFlyout` 中，composer 只写两行绝对高度。`ComposerHeight` 供中心行高和 `UpdateMinimumHeight` 用。`━` 只隐藏 `_sendArea`，保留设置行，按钮始终可见；标题在 `━/■` 间切换。发送区**不做**拖动改高。
 - 设置浮层：入口在 composer 右侧；接收设置含时间戳/超时/接收文件，发送设置含帧尾位置/校验/CRC。浮层是窗体子控件（不是 Form），参与主题重绘；`ShowFlyout` 按锚点向上定位、`SizeFlyout` 每次按当前 DPI 更新行宽和高度；`FlyoutDismissFilter` 处理点外部，`ProcessCmdKey` 处理 Esc，`WM_ACTIVATEAPP` 处理切到其它应用。浮层内下拉框展开时不要关闭浮层。
 - 动效（`MainForm.Motion.cs`）：目前没有面板位移动画；侧栏、发送区、右抽屉都即时显隐，避免每帧重排富文本日志。画布变化时冻结日志重绘并只做一次布局；验证发送区收起/展开两条路径。
@@ -211,8 +212,11 @@ taskkill //IM sscomRe_v1.3.0.exe //F
 - 日志头端口下拉 `LogPortPicker` 与连接栏 `PortField` 共用 `PortPopup`：`TogglePortPopup(anchor)` 记录 `_portPopupAnchor`，关闭时同时复位两个控件的 `Opened`；`PortPopupDismissFilter` 必须放行 `IsPortPopupAnchor` 里的两个锚点，否则点标题会先关再开。
 - 日志高亮在 `LogHighlighter.Style` 内按字符级 owner 实现“列表靠前优先”；规则背景 A<255 时先与日志底色混合再写 RTF。有启用规则时 `AppendFormatted` 会先用 `HasAnyMatch` 做整批预筛，纯数据无命中仍走 `AppendText` 快路径；新增依赖日志文本的操作要先考虑分块重画是否完成。
 - 高亮规则预览：选中规则即使关闭也按开启效果预览；候选行依次取预置示例/关键字示例、最近 40 行日志命中、通用示例，最多显示 3 行。`HighlightRulesDialog.PreviewStyledLines` 是纯逻辑并有自检，改动预览时不要退回固定 ERROR 示例。
-- 日志导出：日志头「保存 ▾」是 `_saveMenu`（ContextMenuStrip，主题切换时在 `ApplyTheme` 里重新 `StyleContextMenu`）；“保存数据”仍是原 TXT+DAT 行为，新增两项走 `SaveColoredLog(rtf)` → `LogExport.ToRtf/ToHtml`，按当前显示文本与当前规则重新着色。导出前必须 `CompletePendingRenderLog()`；RTF 写 ASCII（非 ASCII 走 `\uNNNN?`），HTML 写带 BOM 的 UTF-8。
+- 日志导出：发送区设置行的「保存数据 ▾」是 `_saveMenu`（ContextMenuStrip，主题切换时在 `ApplyTheme` 里重新 `StyleContextMenu`）；“保存数据”走 `SaveData()`（先选目录，TXT+DAT），另两项走 `SaveColoredLog(rtf)` → `LogExport.ToRtf/ToHtml`，按当前显示文本与当前规则重新着色。导出前必须 `CompletePendingRenderLog()`；RTF 写 ASCII（非 ASCII 走 `\uNNNN?`），HTML 写带 BOM 的 UTF-8。
 - 持续 HTML 记录在 `HtmlLogRecorder`：`AppendRecv` 负责接收与显示回显（普通 `Append` 永远跳过 TX 行），发送数据在 `WriteChannel` 成功后调用 `AppendTx` 单独写入，因此不依赖“加时间戳”是否开启显示回显。每行只给与默认色不同的片段写 `<span>`；按字节阈值在行边界分卷，每卷写完整头/尾，异常退出时浏览器也能自动闭合。规则/调色板/HEX 模式在开始记录时快照，修改后需取消并重新勾选。记录状态与失败检测在 `StatusTick` 的 `UpdateHtmlCaptureStatus` 中，误删这条会看不到写入错误。
+- 暂停显示：`_displayPaused` 只停住 `_recvBox` 的增量刷新，接收/解析继续，新文本进入 `_displayHold`（截断时 `_displayHoldBase` 保存整屏）；恢复时补画，`LogicalWindowText()` 让保存数据包含暂停期间的内容。暂停显示/清除窗口/保存数据与自动滚动在同一行；不要改回“暂停=停止滚动”，也不要在暂停时停止接收。
+- GNSS：`NmeaParser` 支持 GGA/RMC/GLL/GNS/VTG/GSA/GSV/ZDA；GSV 以（星座, PRN）合并，6 秒无更新过期，`SatellitesInView` 按 SNR 降序；GSA 提供 PDOP/HDOP/VDOP，GGA 提供水准面差距/差分龄期/基准站。`GnssWindow` 客户区 420×620、自定义绘制；卫星只显示前 6 颗，信号条颜色按 SNR 强度（≥40 / 25–39 / <25），星座徽标为 G/C/E/R；坐标卡同时显示十进制度与 DMS。**参与数来自 GGA/GNS，可见数只统计 GSV**：设备未输出全部星座 GSV（常见 QZSS/北斗）时参与数会大于 GSV 可见数，面板显示“GSV 未覆盖全部”，不要用可见数去 clamp 参与数。GPGSV 里 PRN 193–202 / 120–158 会按 QZSS / SBAS 归类。
+- 按目录保存：`SaveData()` 先 `SaveDataDialog.Choose`（默认上次目录，之后才是 CWD），再写 `SaveWindows<时间戳>.TXT`（GBK，含暂停 hold 内容）和 `SAVE<时间戳>.DAT`（原始字节）；目录不可写用 MessageBox，成功提示保留模态。目录只在本次运行记忆，未写 ini。
 - Ctrl+K 命令面板只读已保存命令：可见页读控件，未建页读 `_multiRowSource`；`CommandPaletteDismissFilter` 负责点击外部关闭，`Ctrl+K`/Esc 在 `ProcessCmdKey` 中切换。顶部工具栏「命令面板」按钮是唯一鼠标入口（`BuildToolBar`），面板不包含清空/删除类操作。
 - composer 设置行高度按 `RowHeightOf` 额外 +4px（`UpdateComposerGridRows`），给自绘下拉框/按钮留 Margin。
 - 禁止在深色控件上再用 `SystemColors.Control/Window/WindowText` 或 `Color.White/Yellow`；所有颜色走 `Theme` token。
@@ -248,7 +252,7 @@ taskkill //IM sscomRe_v1.3.0.exe //F
 | 校验下拉序号 = 模式（0=None…7=ADD16）；帧尾下拉序号 = 保留字节数（0..4） | 不要另外做映射表 |
 | 模式 2（CCITT）初值 0 → 向量 0x31C3（不是 CRC-16/CCITT-FALSE 的 0x29B1） | 已写在 `Checksums` 注释 |
 | `SendPayload` 的“未打开串口先提示再自动打开”只适用于串口模式 | 网络模式不弹提示 |
-| 保存数据 = 双文件（`SAVE*.DAT` 原始 + `SaveWindows*.TXT` 窗口内容）；接收落文件 = 追加 | 已按规格实现；落文件名串口用端口名、网络用 `TCPCLIENT/TCPSERVER/UDP` |
+| 保存数据 = 双文件（`SAVE*.DAT` 原始 + `SaveWindows*.TXT` 窗口内容），先选目录；接收落文件 = 追加 | 已按规格实现；落文件名串口用端口名、网络用 `TCPCLIENT/TCPSERVER/UDP` |
 | 字体对话框传入已释放的 Font → “参数无效” | `LivingRecvFont` 修复；同字体重复设置不能释放控件正在用的对象 |
 | 自检直接跑在主窗体上，Close 会把测试字体/模式/窗口几何写进用户的 ini | 自检现在备份/恢复 ini；新增 UI 用例不要在恢复逻辑之外写文件 |
 | 布局测试写死 1200×720 → 200% DPI 下窗口过矮而误报 | 按 `DeviceDpi/96` 缩放测试窗口尺寸 |
@@ -292,7 +296,7 @@ taskkill //IM sscomRe_v1.3.0.exe //F
 - 打开文件预览用原字节直接按 Latin-1 式字符累积文本，再经 `ReceiveDisplay.SetPreviewBuffers` 替换预览缓冲；原始接收缓冲和接收计数不动。
 - 网络服务端本地端口非法时选择“提示后不启动”（规格此处原程序响应未细读）。
 - 标题栏继续用 DWM 深/浅原生方案（用户确认），完全自绘标题栏不在本期；浅色模式下系统文件/字体/颜色对话框观感正常，深色模式下这些原生对话框仍是浅色。
-- 保存数据的成功/失败提示按规格保留模态 MessageBox；toast 只用于搜索无结果、清除接收区、复制纯数据这类规格未规定弹窗的 UI 反馈。
+- 保存数据的目录选择、成功/失败提示按规格保留模态 MessageBox；toast 只用于搜索无结果、清除接收区、复制纯数据这类规格未规定弹窗的 UI 反馈。
 - 1 MiB/s 的 HEX 显示比文本模式重约 3 倍；当前压测 avg 52ms/30KiB，可能掉帧，但原始接收缓冲、计数和保存数据不受影响。文本模式 avg 15.8ms，已满足 30ms 预算。
 - 本机 COM38/COM39 只做了接收与换口冒烟；DTR/RTS、发送文件、定时发送与真实网口仍需在目标硬件复验。TCP/UDP 本机回环自检仍在 `--selftest` 中。
 - 接收/发送低频项和 toast 已实现；发送区只收起文本框、左栏宽度可拖动（本次运行内不持久化）；右抽屉首次展开仍有一次性热缓存（本机约 0.8s），之后约 0.1s；剩余 100%/150% DPI 截图与真实硬件复验。
