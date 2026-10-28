@@ -95,6 +95,11 @@ internal static class Theme
     public static ThemePalette Current { get; private set; } = DarkPalette;
     public static bool IsLight => !Current.IsDark;
 
+    /// <summary>导出/长期记录用的浅色文档调色板，与界面当前主题无关。</summary>
+    public static LogHighlightPalette DocumentPalette() => new(
+        LightPalette.Text, LightPalette.Log, LightPalette.Dim, LightPalette.Accent,
+        LightPalette.StatusSend, LightPalette.Accent, LightPalette.TxWash);
+
     public static void SetLight(bool light) => Current = light ? LightPalette : DarkPalette;
 
     public static Color Canvas => Current.Canvas;

@@ -882,8 +882,10 @@ public sealed partial class MainForm
         _pauseButton.Click += (_, _) => ToggleFollow();
         var clear = ActionButton("清除", ClearReceive);
         _rowTip.SetToolTip(clear, "清除窗口");
-        var save = ActionButton("保存", SaveData);
-        _rowTip.SetToolTip(save, "保存数据");
+        _saveMenu = BuildSaveMenu();
+        var save = ActionButton("保存 ▾", null);
+        save.Click += (_, _) => _saveMenu.Show(save, new Point(0, save.Height));
+        _rowTip.SetToolTip(save, "保存数据（TXT + DAT）或另存为带颜色日志（RTF / HTML）");
         actions.Controls.Add(_searchBox);
         actions.Controls.Add(_pauseButton);
         actions.Controls.Add(clear);
@@ -1054,7 +1056,7 @@ public sealed partial class MainForm
     {
         Panel shell = NewFlyoutShell(out Panel body);
         TableLayoutPanel content = NewFlyoutContent();
-        int inner = FlyoutWidth(340) - 2 - FlyoutPadding() * 2;
+        int inner = FlyoutWidth(480) - 2 - FlyoutPadding() * 2;
         int row = 0;
         void Add(Control control, int gap)
         {
@@ -1066,7 +1068,7 @@ public sealed partial class MainForm
         }
 
         Add(FlyoutTitle("接收设置"), 2);
-        Add(FlyoutHint("日志显示与接收落盘", inner), 10);
+        Add(FlyoutHint("日志显示、原始落盘与 HTML 记录", inner), 10);
         Add(FlyoutDivider(), 12);
 
         _timestampBox = new ThemeCheckBox { Text = "加时间戳和分包显示", AutoSize = true, Checked = true };
@@ -1079,10 +1081,116 @@ public sealed partial class MainForm
 
         _recvToFileBox = new ThemeCheckBox { Text = "接收数据到文件", AutoSize = true };
         Add(_recvToFileBox, 6);
-        Add(FlyoutHint("文件写入当前工作目录，按端口/协议与时间命名。", inner), 0);
+        Add(FlyoutHint("原始字节写入当前工作目录，按端口/协议与时间命名。", inner), 10);
+
+        Add(FlyoutDivider(), 12);
+        _recvHtmlBox = new ThemeCheckBox { Text = "持续记录 HTML（带颜色）", AutoSize = true };
+        _recvHtmlBox.CheckedChanged += (_, _) => OnRecvHtmlChanged();
+        _rowTip.SetToolTip(_recvHtmlBox, "按开始记录时的显示模式（HEX/文本）与规则，持续写入可独立打开的 HTML 分卷");
+        Add(_recvHtmlBox, 4);
+
+        int fieldH = Math.Max(Theme.Scale(this, 30), Font.Height + Theme.Scale(this, 10));
+        var dirRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = fieldH,
+            ColumnCount = 4,
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = Theme.Surface,
+        };
+        dirRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        dirRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        dirRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        dirRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        dirRow.RowStyles.Add(new RowStyle(SizeType.Absolute, fieldH));
+        Label dirLabel = FlyoutLabel("目录");
+        dirLabel.Margin = new Padding(0, 0, Theme.Scale(this, 6), 0);
+        dirLabel.Anchor = AnchorStyles.Left;
+        _recvHtmlDirBox = new ThemeTextBox
+        {
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
+            Margin = new Padding(0, 0, Theme.Scale(this, 6), 0),
+            Font = Theme.MonoFont(8F),
+            PlaceholderText = "默认：程序当前目录",
+        };
+        _recvHtmlDirBox.TextChanged += (_, _) =>
+        {
+            string path = _recvHtmlDirBox.Text.Trim();
+            _rowTip.SetToolTip(_recvHtmlDirBox, path.Length == 0 ? "默认：程序当前目录" : path);
+        };
+        _rowTip.SetToolTip(_recvHtmlDirBox, "默认：程序当前目录");
+        _recvHtmlPickButton = ActionButton("选择...");
+        _recvHtmlPickButton.Margin = new Padding(0, 0, Theme.Scale(this, 6), 0);
+        _recvHtmlPickButton.Anchor = AnchorStyles.Left;
+        _recvHtmlPickButton.Click += (_, _) => PickHtmlDir();
+        var openHtmlDir = ActionButton("打开");
+        openHtmlDir.Margin = new Padding(0);
+        openHtmlDir.Anchor = AnchorStyles.Left;
+        openHtmlDir.Click += (_, _) => OpenHtmlDir();
+        _rowTip.SetToolTip(openHtmlDir, "打开 HTML 日志所在文件夹");
+        dirRow.Controls.Add(dirLabel, 0, 0);
+        dirRow.Controls.Add(_recvHtmlDirBox, 1, 0);
+        dirRow.Controls.Add(_recvHtmlPickButton, 2, 0);
+        dirRow.Controls.Add(openHtmlDir, 3, 0);
+        Add(dirRow, 6);
+
+        var optionGrid = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            RowCount = 2,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = Theme.Surface,
+        };
+        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        optionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        optionGrid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        // 下拉的关闭高度由 ItemHeight 决定，比 PreferredHeight 高。AutoSize 行会裁掉底边。
+        int comboH = ThemeComboBox.ClosedHeightFor(this);
+        optionGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, comboH));
+        Label splitLabel = FlyoutLabel("分卷");
+        splitLabel.Margin = new Padding(0, 0, 0, 3);
+        Label paletteLabel = FlyoutLabel("调色板");
+        paletteLabel.Margin = new Padding(Theme.Scale(this, 8), 0, 0, 3);
+        _recvHtmlSplitCombo = new ThemeComboBox
+        {
+            Dock = DockStyle.Fill,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Margin = new Padding(0, 0, Theme.Scale(this, 8), 0),
+            MinimumSize = new Size(0, comboH),
+        };
+        _recvHtmlSplitCombo.Items.AddRange(new object[] { "不分卷", "10 MB", "25 MB", "50 MB", "100 MB" });
+        _recvHtmlSplitCombo.SelectedIndex = 3;
+        _recvHtmlPaletteCombo = new ThemeComboBox
+        {
+            Dock = DockStyle.Fill,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Margin = new Padding(Theme.Scale(this, 8), 0, 0, 0),
+            MinimumSize = new Size(0, comboH),
+        };
+        _recvHtmlPaletteCombo.Items.AddRange(new object[] { "浅色文档", "跟随界面主题" });
+        _recvHtmlPaletteCombo.SelectedIndex = 0;
+        optionGrid.Controls.Add(splitLabel, 0, 0);
+        optionGrid.Controls.Add(paletteLabel, 1, 0);
+        optionGrid.Controls.Add(_recvHtmlSplitCombo, 0, 1);
+        optionGrid.Controls.Add(_recvHtmlPaletteCombo, 1, 1);
+        Add(optionGrid, 6);
+
+        _recvHtmlTxBox = new ThemeCheckBox { Text = "含发送回显", AutoSize = true };
+        _rowTip.SetToolTip(_recvHtmlTxBox, "记录发送按钮、文件和终端的发送数据");
+        Add(_recvHtmlTxBox, 6);
+
+        _recvHtmlStatus = FlyoutHint("未开始记录（勾选后开始）", inner);
+        Add(_recvHtmlStatus, 4);
+        Add(FlyoutHint("按开始记录时的规则与调色板；修改后重新勾选生效。", inner), 0);
 
         body.Controls.Add(content);
-        SizeFlyout(shell, content, 340);
+        SizeFlyout(shell, content, 480);
         shell.Tag = content;
         return shell;
     }
@@ -1275,12 +1383,34 @@ public sealed partial class MainForm
             else if (child is Label label && label.MaximumSize.Width > 0)
                 label.MaximumSize = new Size(inner, 0);
         }
+        FitHtmlOptionCombos();
         content.PerformLayout();
         int height = content.GetPreferredSize(new Size(inner, 0)).Height;
         if (height <= 0) height = Theme.Scale(this, 120);
         content.Height = height;
         shell.Height = height + pad * 2 + 2;
         shell.PerformLayout();
+    }
+
+    /// <summary>
+    /// 句柄创建后原生下拉可能比公式再高几个像素。行高跟上去，避免底边再次被裁切。
+    /// </summary>
+    private void FitHtmlOptionCombos()
+    {
+        if (_recvHtmlSplitCombo?.Parent is not TableLayoutPanel grid) return;
+        if (grid.RowStyles.Count < 2) return;
+        int needed = ThemeComboBox.ClosedHeightFor(this);
+        if (_recvHtmlSplitCombo.IsHandleCreated && _recvHtmlPaletteCombo.IsHandleCreated)
+        {
+            int live = Math.Max(_recvHtmlSplitCombo.Height, _recvHtmlPaletteCombo.Height);
+            if (live > needed && live <= needed + 8) needed = live;
+        }
+        RowStyle style = grid.RowStyles[1];
+        if (style.SizeType == SizeType.Absolute && Math.Abs(style.Height - needed) < 0.5f) return;
+        grid.RowStyles[1] = new RowStyle(SizeType.Absolute, needed);
+        var min = new Size(0, needed);
+        _recvHtmlSplitCombo.MinimumSize = min;
+        _recvHtmlPaletteCombo.MinimumSize = min;
     }
 
     private void ToggleFlyout(Panel flyout, Control anchor)
@@ -1301,7 +1431,7 @@ public sealed partial class MainForm
         ClosePortPopup(false);
         CloseFlyout();
         if (flyout.Tag is not TableLayoutPanel content) return;
-        int logicalWidth = ReferenceEquals(flyout, _sendSettingsFlyout) ? 380 : 340;
+        int logicalWidth = ReferenceEquals(flyout, _recvSettingsFlyout) ? 480 : 380;
         SizeFlyout(flyout, content, logicalWidth);
         Point corner = anchor.PointToScreen(new Point(anchor.Width, 0));
         Point p = PointToClient(corner);

@@ -99,7 +99,13 @@ public static class IniDocument
         string rulesJson = snap.HighlightRulesJson;
         Setting(sb, "日志高亮规则(base64 JSON)", 1096,
             rulesJson.Length == 0 ? "" : Convert.ToBase64String(Encoding.UTF8.GetBytes(rulesJson)));
+        Setting(sb, "HTML日志记录目录", 1097, snap.RecvHtmlDir);
+        Setting(sb, "HTML日志分卷MB(0=不分卷)", 1098, snap.RecvHtmlSplitMb.ToString(CultureInfo.InvariantCulture));
+        Setting(sb, "HTML日志浅色调色板", 1099, Bit(snap.RecvHtmlLight));
         Setting(sb, "C:Chinese汉语, E:English", 1100, "C");
+        Setting(sb, "HTML日志含发送回显", 1101, Bit(snap.RecvHtmlIncludeTx));
+        Setting(sb, "HTML日志设置版本", 1102,
+            snap.RecvHtmlSettingsVersion.ToString(CultureInfo.InvariantCulture));
         sb.Append(";end\r\n");
         return sb.ToString();
     }
@@ -309,6 +315,11 @@ public static class IniDocument
             case 1100:
                 snap.Language = value;
                 break;
+            case 1097: snap.RecvHtmlDir = value; break;
+            case 1098: snap.RecvHtmlSplitMb = Math.Max(0, ParseInt(value, 50)); break;
+            case 1099: snap.RecvHtmlLight = IsOn(value); break;
+            case 1101: snap.RecvHtmlIncludeTx = IsOn(value); break;
+            case 1102: snap.RecvHtmlSettingsVersion = Math.Max(0, ParseInt(value, 0)); break;
         }
     }
 
@@ -405,5 +416,15 @@ public sealed class IniSnapshot
     public bool AutoScroll { get; set; } = true;
     /// <summary>N1096：日志高亮规则 JSON；ini 内以 UTF-8 Base64 存放。</summary>
     public string HighlightRulesJson { get; set; } = "";
+    /// <summary>N1097：持续 HTML 记录目录；空表示程序当前目录。</summary>
+    public string RecvHtmlDir { get; set; } = "";
+    /// <summary>N1098：持续 HTML 记录分卷大小 MB；0 表示不分卷。</summary>
+    public int RecvHtmlSplitMb { get; set; } = 50;
+    /// <summary>N1099：持续 HTML 记录使用浅色文档调色板。</summary>
+    public bool RecvHtmlLight { get; set; } = true;
+    /// <summary>N1101：持续 HTML 记录包含发送回显。</summary>
+    public bool RecvHtmlIncludeTx { get; set; } = true;
+    /// <summary>N1102：持续 HTML 记录设置版本；缺省 0 表示旧配置（10MB 默认）。</summary>
+    public int RecvHtmlSettingsVersion { get; set; }
     public string Language { get; set; } = "C";
 }

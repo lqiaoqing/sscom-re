@@ -23,6 +23,7 @@ public sealed partial class MainForm : Form
     private readonly List<ToolStripMenuItem> _limitItems = new();
     private ThemeTextBox _searchBox = null!;
     private ThemeButton _pauseButton = null!;
+    private ContextMenuStrip _saveMenu = null!;
     private int _searchStart = -1;
     private int _searchLength;
     private ToolStripStatusLabel _rxRateLabel = null!;
@@ -58,6 +59,15 @@ public sealed partial class MainForm : Form
     private readonly object _recvFileGate = new();
     private FileStream? _recvFileStream;
     private string _recvFilePath = "";
+    private ThemeCheckBox _recvHtmlBox = null!;
+    private ThemeTextBox _recvHtmlDirBox = null!;
+    private ThemeComboBox _recvHtmlSplitCombo = null!;
+    private ThemeComboBox _recvHtmlPaletteCombo = null!;
+    private ThemeCheckBox _recvHtmlTxBox = null!;
+    private Label _recvHtmlStatus = null!;
+    private Button _recvHtmlPickButton = null!;
+    private HtmlLogRecorder? _htmlRecorder;
+    private bool _suppressHtmlCheck;
     private ComboBox _verifyBox = null!;
     private TextBox _verifyNumEdit = null!;
     private ComboBox _tailCombo = null!;
@@ -547,13 +557,16 @@ public sealed partial class MainForm : Form
         });
 
         var multi = new ToolStripMenuItem("多条字符串", null, (_, _) => ToggleMultiPanel());
+        var tools = new ToolStripMenuItem("工具");
+        _gnssItem = new ToolStripMenuItem("GNSS", null, (_, _) => ToggleGnssWindow());
+        tools.DropDownItems.Add(_gnssItem);
         var help = new ToolStripMenuItem("帮助");
         help.DropDownItems.Add(new ToolStripMenuItem("关于", null, (_, _) =>
             MessageBox.Show(this,
                 $"串口/网络数据调试器(定制版)\n版本 v{AppVersion}\nC# / .NET Framework 4.8，依据 sscom5.13.1-rewrite-spec.md 的行为规则实现。",
                 $"关于 sscomRe v{AppVersion}", MessageBoxButtons.OK, MessageBoxIcon.Information)));
 
-        menu.Items.AddRange(new ToolStripItem[] { comm, portCfg, display, send, multi, help });
+        menu.Items.AddRange(new ToolStripItem[] { comm, portCfg, display, send, multi, tools, help });
         Theme.StyleMenu(menu);
         return menu;
     }
@@ -1831,6 +1844,7 @@ public sealed partial class MainForm : Form
         // 只用快照字段，不在接收线程里读控件
         string segment = _receive.Process(data, _snapHexDisplay, _snapTimestamp,
             _snapTimeoutMs, out string? memoReplace);
+        if (_snapGnss) _nmea.Push(data);
         EnqueueDisplay(segment, memoReplace);
     }
 
@@ -1904,6 +1918,7 @@ public sealed partial class MainForm : Form
     private void AppendRecv(string text)
     {
         if (text.Length == 0) return;
+        _htmlRecorder?.Append(text);
         if (!_recvBox.IsHandleCreated)
         {
             _recvBox.AppendText(text);
@@ -2048,15 +2063,7 @@ public sealed partial class MainForm : Form
             CloseRecvFile();
             return;
         }
-        string piece;
-        if (_netMode == NetMode.TcpClient) piece = "TCPCLIENT";
-        else if (_netMode == NetMode.TcpServer) piece = "TCPSERVER";
-        else if (_netMode == NetMode.Udp) piece = "UDP";
-        else
-        {
-            piece = _port.IsOpen ? _port.OpenedPortName : ComPortService.NormalizePortName(_portCombo.Text);
-            if (piece.Length == 0) piece = "COM";
-        }
+        string piece = CurrentTransferName();
         string name = Path.Combine(Directory.GetCurrentDirectory(),
             "ReceivedTofile-" + piece + SendComposer.FileTimestamp() + ".DAT");
         _recvFileName = name;
@@ -2498,6 +2505,8 @@ public sealed partial class MainForm : Form
         Highlight(_newLineBox, _newLineBox.Checked && !_hexSendBox.Checked);
         Highlight(_timerSendBox, _timerSendBox.Checked);
         Highlight(_recvToFileBox, _recvToFileBox.Checked);
+        Highlight(_recvHtmlBox, _recvHtmlBox.Checked);
+        UpdateHtmlCaptureStatus();
 
         // 校验组：模式 None(0) 时白底、否则黄底（标签跟随）
         bool verifying = _verifyBox.SelectedIndex > 0;
@@ -2804,11 +2813,24 @@ public sealed partial class MainForm : Form
     {
         if (_netMode == NetMode.Serial)
         {
-            if (_port.IsOpen) _port.Write(data);
+            if (!_port.IsOpen) return;
+            _port.Write(data);
         }
         else if (_net.Ready)
         {
             _net.Send(data, _netMode, _remoteIpBox.Text.Trim(), ParsePort(_remotePortBox.Text, 8080));
+        }
+        else
+        {
+            return;
+        }
+        // 发送数据直接进入持续记录；显示回显是否开启不影响这里
+        if (_htmlRecorder is not null)
+        {
+            string content = _snapHexDisplay
+                ? SendComposer.HexText(data)
+                : SendComposer.EscapeForDisplay(data);
+            _htmlRecorder.AppendTx(content);
         }
     }
 
@@ -3354,7 +3376,9 @@ public sealed partial class MainForm : Form
         _rxRateLabel.ForeColor = Theme.Accent;
         _txRateLabel.ForeColor = Theme.StatusSend;
         _bufferLabel.ForeColor = Theme.Muted;
+        _gnssWindow?.RefreshTheme();
         if (_recvBox.ContextMenuStrip is ContextMenuStrip logMenu) Theme.StyleContextMenu(logMenu);
+        if (_saveMenu is not null) Theme.StyleContextMenu(_saveMenu);
         // 配色已经换好，先让窗口重画；日志就是 1M 字符，重画改为按块异步，点击立即有反馈。
         if (IsHandleCreated && !IsDisposed)
         {
@@ -3638,6 +3662,8 @@ public sealed partial class MainForm : Form
         _sendStringTimer.Stop();
         _multiTimer.Stop();
         _autoSaveTimer.Stop();
+        try { _htmlRecorder?.Dispose(); } catch { /* 关闭时写 footer 失败不影响退出 */ }
+        _htmlRecorder = null;
         CloseRecvFile();                       // 先把接收文件 flush/关闭再存参数
         SaveConfig();
         try { _net.Disconnect(); } catch { /* 关闭时断开失败不影响退出 */ }
@@ -3733,6 +3759,11 @@ public sealed partial class MainForm : Form
             AddCrLf = _newLineBox.Checked,
             AutoScroll = _autoScrollBox.Checked,
             HighlightRulesJson = LogHighlightRuleStore.ToJson(_highlightRules),
+            RecvHtmlDir = _recvHtmlDirBox.Text,
+            RecvHtmlSplitMb = HtmlSplitMb(),
+            RecvHtmlLight = _recvHtmlPaletteCombo.SelectedIndex == 0,
+            RecvHtmlIncludeTx = _recvHtmlTxBox.Checked,
+            RecvHtmlSettingsVersion = HtmlSettingsVersion,
             HexDisplay = _hexDisplayBox.Checked,
             VerifyMode = Math.Max(0, _verifyBox.SelectedIndex),
             Dtr = _dtrBox.Checked,
@@ -3843,6 +3874,25 @@ public sealed partial class MainForm : Form
             _timerIntervalEdit.Text = snap.TimerInterval;
             _newLineBox.Checked = snap.AddCrLf;
             _autoScrollBox.Checked = snap.AutoScroll;
+            if (_htmlRecorder is not null)
+            {
+                _suppressHtmlCheck = true;
+                _recvHtmlBox.Checked = false;
+                _suppressHtmlCheck = false;
+                StopHtmlCapture(showToast: false);
+            }
+            _recvHtmlDirBox.Text = snap.RecvHtmlDir;
+            _recvHtmlSplitCombo.SelectedIndex = NormalizeRecvHtmlSplitMb(
+                snap.RecvHtmlSplitMb, snap.RecvHtmlSettingsVersion) switch
+            {
+                0 => 0,
+                10 => 1,
+                25 => 2,
+                100 => 4,
+                _ => 3,
+            };
+            _recvHtmlPaletteCombo.SelectedIndex = snap.RecvHtmlLight ? 0 : 1;
+            _recvHtmlTxBox.Checked = snap.RecvHtmlIncludeTx;
             _hexDisplayBox.Checked = snap.HexDisplay;
             _verifyBox.SelectedIndex = Fx.Clamp(snap.VerifyMode, 0, _verifyBox.Items.Count - 1);
             _dtrBox.Checked = snap.Dtr;

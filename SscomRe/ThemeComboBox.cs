@@ -36,6 +36,24 @@ internal sealed class ThemeComboBox : ComboBox
         SyncItemHeight();
     }
 
+    /// <summary>
+    /// 关闭状态下的高度。OwnerDraw 的选择区按 ItemHeight 排，比 PreferredHeight 更高；
+    /// AutoSize 行若按 PreferredHeight 分配，底边会被父面板裁掉。
+    /// </summary>
+    internal static int ClosedHeightFor(Control scaleSource)
+    {
+        int item = Math.Max(Theme.Scale(scaleSource, 20), scaleSource.Font.Height + Theme.Scale(scaleSource, 8));
+        // 96 DPI 实测：ItemHeight 24 时控件总高 30，边框约占 6px。
+        int chrome = SystemInformation.BorderSize.Height * 4 + 2;
+        return item + chrome;
+    }
+
+    public override Size GetPreferredSize(Size proposedSize)
+    {
+        Size size = base.GetPreferredSize(proposedSize);
+        return new Size(size.Width, Math.Max(size.Height, ClosedHeightFor(this)));
+    }
+
     private void SyncItemHeight()
     {
         int wanted = Math.Max(Theme.Scale(this, 20), Font.Height + Theme.Scale(this, 8));

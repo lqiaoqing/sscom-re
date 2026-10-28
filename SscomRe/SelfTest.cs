@@ -487,6 +487,11 @@ internal static class SelfTest
             snap.MultiPageCount = 2;
             snap.AutoScroll = false;
             snap.HighlightRulesJson = "{\"v\":1}";
+            snap.RecvHtmlDir = @"D:\logs";
+            snap.RecvHtmlSplitMb = 25;
+            snap.RecvHtmlLight = false;
+            snap.RecvHtmlIncludeTx = false;
+            snap.RecvHtmlSettingsVersion = 2;
 
             string t1 = IniDocument.Save(snap);
             CheckText("ini 含HEX注释", t1.Contains(IniDocument.CommentHex) ? "yes" : "no", "yes");
@@ -508,6 +513,10 @@ internal static class SelfTest
             CheckText("ini 写多条页数", t1.Contains("N1094=,2\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写自动滚动关闭", t1.Contains("N1095=,0\r\n") ? "yes" : "no", "yes");
             CheckText("ini 写高亮规则", t1.Contains("\r\nN1096=,") ? "yes" : "no", "yes");
+            CheckText("ini 写HTML记录设置",
+                t1.Contains("\r\nN1097=,D:\\logs\r\n") && t1.Contains("\r\nN1098=,25\r\n") &&
+                t1.Contains("\r\nN1099=,0\r\n") && t1.Contains("\r\nN1101=,0\r\n") &&
+                t1.Contains("\r\nN1102=,2\r\n") ? "yes" : "no", "yes");
 
             var loaded = IniDocument.Load(t1);
             string t2 = IniDocument.Save(loaded);
@@ -538,7 +547,14 @@ internal static class SelfTest
             CheckText("ini 还原多条页数", loaded.MultiPageCount.ToString(), "2");
             CheckText("ini 还原自动滚动关闭", loaded.AutoScroll ? "yes" : "no", "no");
             CheckText("ini 还原高亮规则", loaded.HighlightRulesJson, "{\"v\":1}");
+            CheckText("ini 还原HTML记录设置",
+                loaded.RecvHtmlDir + "|" + loaded.RecvHtmlSplitMb + "|" + loaded.RecvHtmlLight + "|" +
+                loaded.RecvHtmlIncludeTx + "|" + loaded.RecvHtmlSettingsVersion,
+                @"D:\logs|25|False|False|2");
             CheckText("ini 新档默认自动滚动", new IniSnapshot().AutoScroll ? "yes" : "no", "yes");
+            CheckText("HTML记录默认分卷50", new IniSnapshot().RecvHtmlSplitMb.ToString(), "50");
+            CheckText("旧10MB默认迁移到50", MainForm.NormalizeRecvHtmlSplitMb(10, 0).ToString(), "50");
+            CheckText("已保存10MB保持10", MainForm.NormalizeRecvHtmlSplitMb(10, 2).ToString(), "10");
             CheckText("旧ini默认自动滚动", IniDocument.Load("").AutoScroll ? "yes" : "no", "yes");
             var legacy = IniDocument.Load("N1=A,hello\r\nN101=2,cmt,1500\r\n");
             CheckText("旧ini第1页仍在", legacy.Data[0], "hello");
@@ -741,6 +757,110 @@ internal static class SelfTest
                 "yes");
         }
 
+        // —— 持续 HTML 记录 ——
+        {
+            string captureDir = Path.Combine(Path.GetTempPath(), "sscom-capture-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var rules = LogHighlightRuleStore.CreateDefaults(true);
+                using (var recorder = new HtmlLogRecorder(captureDir, "COM38", 512,
+                           Theme.DocumentPalette(), false, true, rules))
+                {
+                    recorder.Start();
+                    recorder.Append("[10:00:00.000]收←◆ ERROR 中文 <&>\r\n[10:00:01.000]发→◇ DISPLAY-TX\r\n");
+                    recorder.AppendTx("REAL-TX");
+                    recorder.Append("[10:00:02.000]收←◆ " + new string('x', 600) + "\r\n");
+                }
+                string[] parts = Directory.GetFiles(captureDir, "*.html");
+                Array.Sort(parts, StringComparer.Ordinal);
+                string all = string.Join("\n", parts.Select(File.ReadAllText));
+                CheckText("HTML 记录分卷", parts.Length >= 2 ? "yes" : "no", "yes");
+                CheckText("HTML 记录文档头", all.Contains("<!DOCTYPE html>") ? "yes" : "no", "yes");
+                CheckText("HTML 记录尾部闭合", all.TrimEnd().EndsWith("</html>") ? "yes" : "no", "yes");
+                CheckText("HTML 记录转义", all.Contains("&lt;&amp;&gt;") ? "yes" : "no", "yes");
+                CheckText("HTML 记录带高亮", all.Contains("<span style=") ? "yes" : "no", "yes");
+                CheckText("HTML 记录含发送回显", all.Contains("发→◇") ? "yes" : "no", "yes");
+                CheckText("HTML 记录发送数据", all.Contains("REAL-TX") ? "yes" : "no", "yes");
+                CheckText("HTML 记录不重复显示回显", all.Contains("DISPLAY-TX") ? "yes" : "no", "no");
+                CheckText("HTML 记录卷号", parts[0].Contains("-p001.html") ? "yes" : "no", "yes");
+            }
+            finally
+            {
+                try { Directory.Delete(captureDir, true); } catch { /* 临时目录删不掉不影响结果 */ }
+            }
+
+            string noTxDir = Path.Combine(Path.GetTempPath(), "sscom-capture-notx-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                using (var recorder = new HtmlLogRecorder(noTxDir, "COM1", 0,
+                           Theme.DocumentPalette(), false, false, LogHighlightRuleStore.CreateDefaults(true)))
+                {
+                    recorder.Start();
+                    recorder.Append("RX-DATA\r\n");
+                    recorder.AppendTx("TX-ONLY");
+                }
+                string allNoTx = string.Join("\n",
+                    Directory.GetFiles(noTxDir, "*.html").Select(File.ReadAllText));
+                CheckText("HTML 记录可排除发送", allNoTx.Contains("TX-ONLY") ? "yes" : "no", "no");
+                CheckText("HTML 记录保留接收", allNoTx.Contains("RX-DATA") ? "yes" : "no", "yes");
+            }
+            finally
+            {
+                try { Directory.Delete(noTxDir, true); } catch { /* 临时目录删不掉不影响结果 */ }
+            }
+        }
+
+        // —— NMEA / GNSS ——
+        {
+            static string WithCs(string body)
+            {
+                int cs = 0;
+                foreach (char ch in body) cs ^= ch;
+                return "$" + body + "*" + cs.ToString("X2") + "\r\n";
+            }
+            static byte[] Ascii(string text) => System.Text.Encoding.ASCII.GetBytes(text);
+            string rmc = WithCs("GNRMC,082105.00,A,3113.82496,N,12128.42206,E,0.81,186.2,271026,,,A");
+            string gga = WithCs("GNGGA,082105.00,3113.82496,N,12128.42206,E,1,14,0.8,12.4,M,0.0,M,,");
+            string gsa = WithCs("GNGSA,A,3,,,,,,,,,,,,,1.2,0.8,0.9");
+            string rtk = WithCs("GNGGA,082106.00,3113.82496,N,12128.42206,E,4,18,0.6,12.4,M,0.0,M,,");
+            var parser = new NmeaParser();
+            byte[] first = Ascii(rmc);
+            var head = new byte[8];
+            var tail = new byte[first.Length - 8];
+            Buffer.BlockCopy(first, 0, head, 0, 8);
+            Buffer.BlockCopy(first, 8, tail, 0, tail.Length);
+            parser.Push(head);
+            CheckText("NMEA 半句未完成", parser.Snapshot().View.ToString(), "Waiting");
+            parser.Push(tail);
+            GnssFix fix = parser.Snapshot();
+            CheckText("NMEA 拼句后定位", fix.View.ToString(), "Fixed");
+            CheckText("NMEA 纬度", Math.Abs(fix.Latitude - 31.230416).ToString("0.0000000", System.Globalization.CultureInfo.InvariantCulture), "0.0000000");
+            CheckText("NMEA 经度", Math.Abs(fix.Longitude - 121.473701).ToString("0.0000000", System.Globalization.CultureInfo.InvariantCulture), "0.0000000");
+            CheckText("NMEA 速度 km/h", fix.SpeedKmh is double speed && Math.Abs(speed - 0.81 * 1.852) < 0.0001 ? "yes" : "no", "yes");
+            CheckText("NMEA 纬度文本", fix.FormatLatitude(), "31.230416° N");
+            parser.Push(Ascii(gga + gsa));
+            fix = parser.Snapshot();
+            CheckText("NMEA 卫星数", fix.Satellites?.ToString() ?? "", "14");
+            CheckText("NMEA 海拔", fix.AltitudeMeters is double alt && Math.Abs(alt - 12.4) < 0.001 ? "yes" : "no", "yes");
+            CheckText("NMEA 质量 3D", fix.Quality, "3D");
+            CheckText("NMEA 时间", fix.FormatUtc(), "08:21:05 UTC");
+            parser.Push(Ascii(rtk));
+            CheckText("NMEA 质量 RTK", parser.Snapshot().Quality, "RTK固定");
+            double kept = parser.Snapshot().Latitude;
+            parser.Push(Ascii("$GNRMC,082107.00,A,0000.00000,N,00000.00000,E,0.1,1.0,271026,,,A*00\r\n"));
+            fix = parser.Snapshot();
+            CheckText("NMEA 坏校验不改位置", Math.Abs(fix.Latitude - kept) < 0.0000001 ? "yes" : "no", "yes");
+            CheckText("NMEA 坏校验有标记", fix.ChecksumFailed ? "yes" : "no", "yes");
+            parser.Push(Ascii("\xB5\x62\x00" + rmc));
+            CheckText("NMEA 噪声后仍能定位", parser.Snapshot().View.ToString(), "Fixed");
+            CheckText("NMEA 好句清掉校验失败", parser.Snapshot().ChecksumFailed ? "yes" : "no", "no");
+            string lost = WithCs("GNRMC,082108.00,V,3113.82496,N,12128.42206,E,0.10,10.0,271026,,,A");
+            parser.Push(Ascii(lost));
+            fix = parser.Snapshot();
+            CheckText("NMEA 无效仍留坐标", fix.View == GnssView.Invalid && fix.HasPosition ? "yes" : "no", "yes");
+            CheckText("NMEA 无效年龄后缀", fix.FormatAge(fix.SentenceTick).EndsWith("前") ? "yes" : "no", "yes");
+        }
+
         // —— 主窗体：接收区占大头，选项保持一行，发送框是矮条 ——
         {
             string ini = Path.Combine(AppContext.BaseDirectory, "sscom51.ini");
@@ -877,6 +997,37 @@ internal static class SelfTest
                 Application.DoEvents();
                 CheckText("接收设置浮层可打开", stamp.Visible ? "yes" : "no", "yes");
                 CheckText("时间戳文字不被拆开", stamp.Width >= stamp.PreferredSize.Width - 2 ? "yes" : "no", "yes");
+                ComboBox? splitCombo = null;
+                ComboBox? paletteCombo = null;
+                CheckBox? echoBox = null;
+                foreach (var c in AllControls(form))
+                {
+                    if (c is ComboBox box)
+                    {
+                        bool split = false;
+                        foreach (object item in box.Items)
+                            if (item is string text && text.IndexOf("MB", StringComparison.Ordinal) >= 0) split = true;
+                        if (split) splitCombo = box;
+                        else if (box.Items.Count == 2) paletteCombo = box;
+                    }
+                    if (c is CheckBox cb && cb.Text == "含发送回显") echoBox = cb;
+                }
+                if (splitCombo?.Parent is Control splitHost)
+                {
+                    bool splitFits = splitCombo.Top >= 0 && splitCombo.Bottom <= splitHost.ClientSize.Height;
+                    CheckText("分卷下拉完整可见", splitFits ? "yes" : $"{splitCombo.Bounds}/{splitHost.ClientSize}", "yes");
+                }
+                if (paletteCombo?.Parent is Control paletteHost)
+                {
+                    bool paletteFits = paletteCombo.Top >= 0 && paletteCombo.Bottom <= paletteHost.ClientSize.Height;
+                    CheckText("调色板下拉完整可见", paletteFits ? "yes" : $"{paletteCombo.Bounds}/{paletteHost.ClientSize}", "yes");
+                }
+                if (splitCombo is not null && echoBox is not null)
+                {
+                    Rectangle splitScreen = splitCombo.RectangleToScreen(splitCombo.ClientRectangle);
+                    Rectangle echoScreen = echoBox.RectangleToScreen(echoBox.ClientRectangle);
+                    CheckText("分卷下拉不压住回显", splitScreen.IntersectsWith(echoScreen) ? "yes" : "no", "no");
+                }
                 form.CloseSettingsForTest();
                 Application.DoEvents();
             }
@@ -1066,6 +1217,97 @@ internal static class SelfTest
                 Application.DoEvents();
             }
 
+            CheckText("保存下拉三项", string.Join("|", form.SaveMenuTextsForTest),
+                "保存数据（TXT + DAT）|另存为带颜色日志（RTF）...|另存为带颜色日志（HTML）...");
+
+            form.SetHighlightRulesForTest(LogHighlightRuleStore.CreateDefaults(Theme.IsLight));
+            form.RenderLogForTest("[10:00:00.000]收←◆ ERROR value <1> & ok");
+            Application.DoEvents();
+            form.CompletePendingRenderLogForTest();
+            string exportHtml = form.ExportHtmlForTest();
+            CheckText("HTML 导出含转义", exportHtml.Contains("&lt;1&gt; &amp;") ? "yes" : "no", "yes");
+            CheckText("HTML 导出含高亮 span", exportHtml.Contains("<span style=") ? "yes" : "no", "yes");
+            CheckText("HTML 导出是完整文档",
+                exportHtml.StartsWith("<!DOCTYPE html>") && exportHtml.Contains("</html>") ? "yes" : "no", "yes");
+            string exportRtf = form.ExportRtfForTest();
+            CheckText("RTF 导出文档头",
+                exportRtf.StartsWith(@"{\rtf1") && exportRtf.EndsWith("}") ? "yes" : "no", "yes");
+            CheckText("RTF 导出带段落", exportRtf.Contains(@"\par") ? "yes" : "no", "yes");
+
+            List<LogHighlightRule> noRules = LogHighlightRuleStore.CreateDefaults(Theme.IsLight)
+                .Select(rule =>
+                {
+                    LogHighlightRule copy = rule.Clone();
+                    copy.Enabled = false;
+                    return copy;
+                }).ToList();
+            form.SetHighlightRulesForTest(noRules);
+            form.RenderLogForTest("ERROR plain data");
+            Application.DoEvents();
+            form.CompletePendingRenderLogForTest();
+            CheckText("关闭规则后导出无高亮 span",
+                form.ExportHtmlForTest().Contains("<span style=") ? "yes" : "no", "no");
+
+            using (var exportFont = new Font("Consolas", 9F))
+            {
+                var exportPalette = new LogHighlightPalette(
+                    Color.White, Color.Black, Color.Gray, Color.Teal, Color.Goldenrod,
+                    Color.Teal, Color.LightGoldenrodYellow);
+                var emptyHighlighter = new LogHighlighter();
+                CheckText("HTML 纯数据转义",
+                    LogExport.ToHtml("a<b&c", false, emptyHighlighter, exportPalette, exportFont, "t")
+                        .Contains("a&lt;b&amp;c") ? "yes" : "no", "yes");
+                string rtfPlain = LogExport.ToRtf("plain", false, emptyHighlighter, exportPalette, exportFont);
+                CheckText("RTF 纯数据无颜色段", rtfPlain.Contains(@"{\cf") ? "yes" : "no", "no");
+
+                var fileHighlighter = new LogHighlighter();
+                fileHighlighter.SetRules(LogHighlightRuleStore.CreateDefaults(true));
+                string exportDir = Path.Combine(Path.GetTempPath(), "sscom-export-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    Directory.CreateDirectory(exportDir);
+                    string rtfPath = Path.Combine(exportDir, "log.rtf");
+                    File.WriteAllText(rtfPath,
+                        LogExport.ToRtf("[10:00:00.000]收←◆ ERROR value", false, fileHighlighter, exportPalette, exportFont),
+                        Encoding.ASCII);
+                    string htmlPath = Path.Combine(exportDir, "log.html");
+                    File.WriteAllText(htmlPath,
+                        LogExport.ToHtml("[10:00:00.000]收←◆ ERROR value", false, fileHighlighter, exportPalette, exportFont, "t"),
+                        new UTF8Encoding(true));
+                    CheckText("RTF 文件写读", File.ReadAllText(rtfPath).StartsWith(@"{\rtf1") ? "yes" : "no", "yes");
+                    CheckText("HTML 文件写读", File.ReadAllText(htmlPath).Contains("</html>") ? "yes" : "no", "yes");
+                }
+                finally
+                {
+                    try { Directory.Delete(exportDir, true); } catch { /* 临时目录删不掉不影响结果 */ }
+                }
+            }
+
+            form.SetHighlightRulesForTest(LogHighlightRuleStore.CreateDefaults(Theme.IsLight));
+            form.RenderLogForTest("");
+            Application.DoEvents();
+
+            string uiCaptureDir = Path.Combine(Path.GetTempPath(), "sscom-ui-capture-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                form.StartHtmlCaptureForTest(uiCaptureDir, 10, true, true);
+                CheckText("界面可启动 HTML 记录", form.HtmlCaptureActiveForTest ? "yes" : "no", "yes");
+                form.AppendLogForTest("[10:00:00.000]收←◆ UI-CAP-123 <x>");
+                Application.DoEvents();
+                form.StopHtmlCaptureForTest();
+                Application.DoEvents();
+                string[] uiParts = Directory.GetFiles(uiCaptureDir, "*.html");
+                string uiHtml = uiParts.Length > 0 ? File.ReadAllText(uiParts[0]) : "";
+                CheckText("界面 HTML 记录落盘", uiParts.Length > 0 ? "yes" : "no", "yes");
+                CheckText("界面 HTML 记录含日志", uiHtml.Contains("UI-CAP-123") ? "yes" : "no", "yes");
+                CheckText("界面 HTML 记录含高亮", uiHtml.Contains("<span style=") ? "yes" : "no", "yes");
+            }
+            finally
+            {
+                try { form.StopHtmlCaptureForTest(); } catch { /* 已停止 */ }
+                try { Directory.Delete(uiCaptureDir, true); } catch { /* 临时目录删不掉不影响结果 */ }
+            }
+
             form.ToggleComposerForTest();
             Application.DoEvents();
             CheckText("发送区可收起", form.ComposerVisibleForTest ? "no" : "yes", "yes");
@@ -1118,6 +1360,33 @@ internal static class SelfTest
                     CheckText("展开后宽度恢复", form.SidebarColumnWidthForTest.ToString(), form.SidebarExpandedWidthForTest.ToString());
                 }
             }
+            if (form.MainMenuStrip is not null)
+            {
+                var names = form.MainMenuStrip.Items.Cast<ToolStripItem>().Select(item => item.Text).ToList();
+                int toolsAt = names.IndexOf("工具");
+                int helpAt = names.IndexOf("帮助");
+                CheckText("工具菜单在帮助左边", toolsAt >= 0 && helpAt > toolsAt ? "yes" : string.Join(",", names), "yes");
+                ToolStripMenuItem? gnss = null;
+                if (toolsAt >= 0 && form.MainMenuStrip.Items[toolsAt] is ToolStripMenuItem tools)
+                {
+                    foreach (ToolStripItem item in tools.DropDownItems)
+                        if (item is ToolStripMenuItem menu && menu.Text == "GNSS") gnss = menu;
+                }
+                CheckText("工具菜单有 GNSS", gnss is null ? "no" : "yes", "yes");
+            }
+            form.OpenGnssForTest();
+            Application.DoEvents();
+            CheckText("GNSS 小窗可打开", form.GnssOpenForTest ? "yes" : "no", "yes");
+            CheckText("GNSS 窗口标题", form.GnssTitleForTest, "GNSS");
+            CheckText("打开 GNSS 开始解析", form.GnssParsingForTest ? "yes" : "no", "yes");
+            int cs = 0;
+            const string body = "GNRMC,082105.00,A,3113.82496,N,12128.42206,E,0.81,186.2,271026,,,A";
+            foreach (char ch in body) cs ^= ch;
+            form.FeedGnssForTest(System.Text.Encoding.ASCII.GetBytes("$" + body + "*" + cs.ToString("X2") + "\r\n"));
+            CheckText("GNSS 小窗显示纬度", form.GnssSummaryForTest.Contains("31.230416° N") ? "yes" : form.GnssSummaryForTest, "yes");
+            form.CloseGnssForTest();
+            Application.DoEvents();
+            CheckText("关闭 GNSS 停止解析", form.GnssParsingForTest ? "yes" : "no", "no");
             form.Close();
             // Close 会保存测试中改过的字体/模式/几何；收尾时还原用户原配置。
             if (iniBackup is not null) File.WriteAllBytes(ini, iniBackup);

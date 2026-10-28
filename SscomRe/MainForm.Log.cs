@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Text;
 using System.Windows.Forms;
 
@@ -26,9 +27,7 @@ public sealed partial class MainForm
         List<LogFormatter.Line> lines = LogFormatter.Parse(text, _hexDisplayBox.Checked);
         Color defaultColor = _recvBox.ForeColor;
         Color defaultBack = _recvBox.BackColor;
-        var palette = new LogHighlightPalette(
-            defaultColor, defaultBack, Theme.Dim, Theme.Accent, Theme.StatusSend,
-            Theme.Accent, Theme.TxWash);
+        var palette = CurrentLogPalette();
 
         // 纯数据批次（无时间戳、收发标记、HEX 着色）不值得构造 RTF：
         // AppendText 走 EM_REPLACESEL 纯文本路径，高频接收时省掉整段 RTF 解析。
@@ -94,7 +93,7 @@ public sealed partial class MainForm
             {
                 body.Append(@"{\cf").Append(ColorIndex(run.Fore))
                     .Append(@"\highlight").Append(ColorIndex(run.Back)).Append(' ');
-                AppendRtfText(body, run.Text);
+                LogExport.AppendRtfText(body, run.Text);
                 body.Append('}');
             }
         }
@@ -102,7 +101,7 @@ public sealed partial class MainForm
         var rtf = new StringBuilder(body.Length + 256);
         rtf.Append(@"{\rtf1\ansi\deff0{\fonttbl{\f0\fnil\fcharset")
             .Append(Math.Max(0, (int)_recvBox.Font.GdiCharSet)).Append(' ')
-            .Append(RtfFontName(_recvBox.Font.Name)).Append(@";}}");
+            .Append(LogExport.RtfFontName(_recvBox.Font.Name)).Append(@";}}");
         rtf.Append(@"{\colortbl ;");
         foreach (Color c in colors)
         {
@@ -132,28 +131,9 @@ public sealed partial class MainForm
         _recvBox.SelectionBackColor = back;
     }
 
-    private static string RtfFontName(string name) =>
-        name.Replace(@"\", "").Replace("{", "").Replace("}", "").Replace(";", " ");
-
-    private static void AppendRtfText(StringBuilder sb, string text)
-    {
-        foreach (char ch in text)
-        {
-            switch (ch)
-            {
-                case '\\': sb.Append(@"\\"); break;
-                case '{': sb.Append(@"\{"); break;
-                case '}': sb.Append(@"\}"); break;
-                case '\t': sb.Append(@"\tab "); break;
-                case '\r': break;
-                case '\n': sb.Append(@"\line "); break;
-                default:
-                    if (ch < 32 || ch > 126) sb.Append(@"\u").Append((short)ch).Append('?');
-                    else sb.Append(ch);
-                    break;
-            }
-        }
-    }
+    private LogHighlightPalette CurrentLogPalette() => new(
+        _recvBox.ForeColor, _recvBox.BackColor, Theme.Dim, Theme.Accent, Theme.StatusSend,
+        Theme.Accent, Theme.TxWash);
 
     /// <summary>
     /// 整屏重画：清空后按 64K 字符一块、每块一次 BeginInvoke 追加。
@@ -451,6 +431,25 @@ public sealed partial class MainForm
         return menu;
     }
 
+    private ContextMenuStrip BuildSaveMenu()
+    {
+        var menu = new ContextMenuStrip();
+        var data = new ToolStripMenuItem("保存数据（TXT + DAT）");
+        data.Click += (_, _) => SaveData();
+        var rtf = new ToolStripMenuItem("另存为带颜色日志（RTF）...");
+        rtf.Click += (_, _) => SaveColoredLogRtf();
+        var html = new ToolStripMenuItem("另存为带颜色日志（HTML）...");
+        html.Click += (_, _) => SaveColoredLogHtml();
+        menu.Items.AddRange(new ToolStripItem[] { data, new ToolStripSeparator(), rtf, html });
+        Theme.StyleContextMenu(menu);
+        return menu;
+    }
+
+    internal IReadOnlyList<string> SaveMenuTextsForTest =>
+        _saveMenu is null
+            ? Array.Empty<string>()
+            : _saveMenu.Items.OfType<ToolStripMenuItem>().Select(item => item.Text).ToArray();
+
     // ———————————————————————— 压测钩子（--bench-log） ————————————————————————
 
     internal void PrepareLogBenchmark(bool hex)
@@ -512,6 +511,61 @@ public sealed partial class MainForm
     }
 
     internal void HideToastForTest() => HideToast();
+
+    internal string ExportRtfForTest()
+    {
+        CompletePendingRenderLog();
+        return LogExport.ToRtf(_recvBox.Text, _hexDisplayBox.Checked, _logHighlighter, CurrentLogPalette(), _recvBox.Font);
+    }
+
+    internal string ExportHtmlForTest()
+    {
+        CompletePendingRenderLog();
+        return LogExport.ToHtml(_recvBox.Text, _hexDisplayBox.Checked, _logHighlighter, CurrentLogPalette(),
+            _recvBox.Font, "sscomRe 日志");
+    }
+
+    private void SaveColoredLogRtf() => SaveColoredLog(rtf: true);
+
+    private void SaveColoredLogHtml() => SaveColoredLog(rtf: false);
+
+    /// <summary>另存为带颜色日志：按当前显示重新解析并着色，RTF 保真、HTML 便于分享。</summary>
+    private void SaveColoredLog(bool rtf)
+    {
+        CompletePendingRenderLog();                       // 必须是完整窗口内容
+        string stamp = SendComposer.FileTimestamp();
+        string extension = rtf ? "rtf" : "html";
+        using var dlg = new SaveFileDialog
+        {
+            Filter = rtf ? "RTF 富文本 (*.rtf)|*.rtf" : "HTML 网页 (*.html)|*.html",
+            FileName = "SaveWindows" + stamp + "." + extension,
+            InitialDirectory = Directory.GetCurrentDirectory(),
+            Title = rtf ? "另存为带颜色日志（RTF）" : "另存为带颜色日志（HTML）",
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        try
+        {
+            Cursor = Cursors.WaitCursor;
+            string text = _recvBox.Text;
+            LogHighlightPalette palette = CurrentLogPalette();
+            string content = rtf
+                ? LogExport.ToRtf(text, _hexDisplayBox.Checked, _logHighlighter, palette, _recvBox.Font)
+                : LogExport.ToHtml(text, _hexDisplayBox.Checked, _logHighlighter, palette, _recvBox.Font,
+                    "sscomRe 日志 " + stamp);
+            File.WriteAllText(dlg.FileName, content, rtf ? Encoding.ASCII : new UTF8Encoding(true));
+            ShowToast("已导出 " + Path.GetFileName(dlg.FileName));
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "保存失败：" + ex.Message, "另存为带颜色日志",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            Cursor = Cursors.Default;
+        }
+    }
 
     internal void ShowBenchmarkDemo()
     {

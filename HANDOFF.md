@@ -2,7 +2,7 @@
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
 > 当前版本 **v1.3.0**（2026-10-27），版本记录见 [CHANGELOG.md](CHANGELOG.md)。
-> 当前状态（2026-10-27）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏 + 日志头伸缩开关、Phase 3B 设置浮层、Phase 3C RTF 日志性能/即时面板/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、日志自动跟随、发送设置重排、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动始终跟随、日志头端口快捷下拉、多条面板方案 02、日志高亮规则（9 条预置，错误/警告默认开启，可预览）与 Ctrl+K 命令面板（工具栏按钮入口）已落地；`--selftest` 315/315 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前状态（2026-10-27）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏 + 日志头伸缩开关、Phase 3B 设置浮层、Phase 3C RTF 日志性能/即时面板/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、日志自动跟随、发送设置重排、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动始终跟随、日志头端口快捷下拉、多条面板方案 02、日志高亮规则（9 条预置，错误/警告默认开启，可预览）与 Ctrl+K 命令面板（工具栏按钮入口）、带颜色日志导出、持续 HTML 记录与 GNSS 定位小窗已落地；`--selftest` 373/373 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -42,6 +42,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   SideStatusCard.cs     连接状态卡
   ResizeSplitter.cs     左栏宽度拖动手柄
   MainForm.Log.cs       日志分色追加、搜索/暂停/复制、速率/缓冲
+  MainForm.Capture.cs    持续 HTML 记录启动/停止、目录与分卷设置、状态
   LogFormatter.cs       日志文本 → 着色片段（纯逻辑）
   ThemeRichTextBox.cs   接收日志富文本框（原生滚动条跟随主题）
   Theme.cs              主题 token、DPI 尺寸、DWM、菜单/状态栏渲染、递归兜底
@@ -64,8 +65,13 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   ThemeSwitch.cs        开关式复选框（循环发送）
   LogHighlightRule.cs   日志高亮规则模型、匹配引擎、JSON/Base64 持久化
   HighlightRulesDialog.cs 高亮规则管理（整行着色、导入/导出）
+  LogExport.cs          带颜色日志导出（RTF / HTML）
+  HtmlLogRecorder.cs    持续 HTML 记录（分卷/追加/快照规则）
+  NmeaParser.cs         NMEA 0183 拼句与定位快照（纯逻辑）
+  GnssWindow.cs         工具菜单 GNSS 可拖动定位小窗
+  MainForm.Gnss.cs      GNSS 菜单、解析开关与小窗生命周期
   CommandPalette.cs     Ctrl+K 已保存命令面板
-  SelfTest.cs           --selftest 用例（当前 315 项）
+  SelfTest.cs           --selftest 用例（当前 373 项）
 ```
 
 ---
@@ -92,7 +98,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `sscomRe_v1.3.0.exe --selftest` → `pass=315 fail=0`
+- `sscomRe_v1.3.0.exe --selftest` → `pass=373 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境有 COM38/COM39，只做了接收、换口和侧栏伸缩冒烟；DTR/RTS、发送文件、定时发送与真实网口仍需在目标硬件复验
 
@@ -106,7 +112,7 @@ dotnet build -c Release
 # 输出固定为 SscomRe/bin/net48/sscomRe_v1.3.0.exe（csproj 固定 OutputPath + AssemblyName）
 
 cd bin/net48
-./sscomRe_v1.3.0.exe --selftest          # 必须 pass=315 fail=0
+./sscomRe_v1.3.0.exe --selftest          # 必须 pass=373 fail=0
 ./sscomRe_v1.3.0.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
 
 # 冒烟：跑 ≥5 秒，检查没崩
@@ -149,6 +155,7 @@ taskkill //IM sscomRe_v1.3.0.exe //F
 - `N1094` 记录可见页数（1–3，缺省 1）；第 1 页始终存在，第 2/3 页可通过页签 `＋` 增加、`×` 删除。删除中间页时其后页内容依次前移，末页清空；删除前二次确认，默认按钮为“否”。
 - `N1095` 记录「自动滚动」开关（缺省 1）。勾选时 `AppendRecv/RenderLogFromText` 始终滚到最新（不再判断是否在底部），`SizeChanged/DpiChanged/Activated/Move` 也会 `ScheduleScrollRecvToLatest` 回底；关闭后才保留用户当前滚动位置。日志头的「暂停/继续」与这个开关是同一状态。
 - `N1096` 保存日志高亮规则：新格式为带版本号的 UTF-8 JSON（`{"Version":2,"Rules":[...]}`）再 Base64 写入 ini，仍兼容旧的裸数组。首次启动生成 9 条预置规则，仅「错误/警告」默认开启；旧版只有 ERROR/WARN 的配置在加载时自动补齐其余预置（默认关闭），并按名称识别旧规则，不重复添加。规则的 JSON 也可从「显示 → 日志高亮规则...」导入/导出。
+- `N1097` 持续 HTML 记录目录（空=程序当前目录）；`N1098` 分卷 MB（0=不分卷，默认 50）；`N1099` 浅色文档调色板（1=浅色，0=跟随主题）；`N1101` 是否包含发送回显；`N1102` 设置版本（旧配置 N1098=10 会迁移成 50，之后用户自己选 10 会保留）。勾选状态只在本次运行有效，启动时默认关闭，避免自动写文件。
 - 数据字段转义：`,`→`0x02`、CR→`0x03`、LF→`0x04`；设置行格式 `N<键>=,<值>`。
 - 关窗：停定时器 → `SaveConfig()` → 断网络/关串口。保存几何时最大化用 `RestoreBounds`，不保存屏幕外边界。
 - 多条数据/顺序/延时框按键走约 400ms 防抖再写 ini；勾选、注释和「保存参数」仍马上写。关窗会停掉防抖定时器再按当前控件内容写一次。
@@ -204,6 +211,8 @@ taskkill //IM sscomRe_v1.3.0.exe //F
 - 日志头端口下拉 `LogPortPicker` 与连接栏 `PortField` 共用 `PortPopup`：`TogglePortPopup(anchor)` 记录 `_portPopupAnchor`，关闭时同时复位两个控件的 `Opened`；`PortPopupDismissFilter` 必须放行 `IsPortPopupAnchor` 里的两个锚点，否则点标题会先关再开。
 - 日志高亮在 `LogHighlighter.Style` 内按字符级 owner 实现“列表靠前优先”；规则背景 A<255 时先与日志底色混合再写 RTF。有启用规则时 `AppendFormatted` 会先用 `HasAnyMatch` 做整批预筛，纯数据无命中仍走 `AppendText` 快路径；新增依赖日志文本的操作要先考虑分块重画是否完成。
 - 高亮规则预览：选中规则即使关闭也按开启效果预览；候选行依次取预置示例/关键字示例、最近 40 行日志命中、通用示例，最多显示 3 行。`HighlightRulesDialog.PreviewStyledLines` 是纯逻辑并有自检，改动预览时不要退回固定 ERROR 示例。
+- 日志导出：日志头「保存 ▾」是 `_saveMenu`（ContextMenuStrip，主题切换时在 `ApplyTheme` 里重新 `StyleContextMenu`）；“保存数据”仍是原 TXT+DAT 行为，新增两项走 `SaveColoredLog(rtf)` → `LogExport.ToRtf/ToHtml`，按当前显示文本与当前规则重新着色。导出前必须 `CompletePendingRenderLog()`；RTF 写 ASCII（非 ASCII 走 `\uNNNN?`），HTML 写带 BOM 的 UTF-8。
+- 持续 HTML 记录在 `HtmlLogRecorder`：`AppendRecv` 负责接收与显示回显（普通 `Append` 永远跳过 TX 行），发送数据在 `WriteChannel` 成功后调用 `AppendTx` 单独写入，因此不依赖“加时间戳”是否开启显示回显。每行只给与默认色不同的片段写 `<span>`；按字节阈值在行边界分卷，每卷写完整头/尾，异常退出时浏览器也能自动闭合。规则/调色板/HEX 模式在开始记录时快照，修改后需取消并重新勾选。记录状态与失败检测在 `StatusTick` 的 `UpdateHtmlCaptureStatus` 中，误删这条会看不到写入错误。
 - Ctrl+K 命令面板只读已保存命令：可见页读控件，未建页读 `_multiRowSource`；`CommandPaletteDismissFilter` 负责点击外部关闭，`Ctrl+K`/Esc 在 `ProcessCmdKey` 中切换。顶部工具栏「命令面板」按钮是唯一鼠标入口（`BuildToolBar`），面板不包含清空/删除类操作。
 - composer 设置行高度按 `RowHeightOf` 额外 +4px（`UpdateComposerGridRows`），给自绘下拉框/按钮留 Margin。
 - 禁止在深色控件上再用 `SystemColors.Control/Window/WindowText` 或 `Color.White/Yellow`；所有颜色走 `Theme` token。
