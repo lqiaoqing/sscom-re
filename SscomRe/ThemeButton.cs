@@ -38,14 +38,18 @@ internal sealed class ThemeButton : Button
         TabStop = true;
     }
 
+    /// <summary>和同一行的复选框共用较紧的左右留白，避免按钮内边距把间隔撑开。</summary>
+    public bool Compact { get; set; }
+
     private int IconSize => Math.Max(12, (int)(Font.Height * 0.72F));
     private int IconGap => Math.Max(4, Theme.Scale(this, 6));
+    private int HorizontalChrome => Theme.Scale(this, Compact ? 8 : 18);
 
     private static bool IsIconOnly(string text) => text is "↻" or "−" or "＋" or "×" or "━" or "■" or "«" or "»";
 
     private static bool HasIcon(string text) => text switch
     {
-        "清除窗口" or "打开文件" or "发送文件" or "停止" or "清发送区"
+        "暂停显示" or "继续显示" or "清除窗口" or "打开文件" or "发送文件" or "停止" or "清发送区"
             or "保存参数" or "保存数据" or "扩展" or "更多串口设置"
             or "打开串口" or "关闭串口" => true,
         _ => false,
@@ -61,7 +65,7 @@ internal sealed class ThemeButton : Button
         Size text = TextRenderer.MeasureText(string.IsNullOrEmpty(Text) ? " " : Text, Font,
             new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
         int icon = HasIcon(Text) ? IconSize + IconGap : 0;
-        int w = text.Width + icon + Theme.Scale(this, 18) + Padding.Horizontal;
+        int w = text.Width + icon + HorizontalChrome + Padding.Horizontal;
         // 比行高略矮，留出 FlowLayoutPanel 的上下 Margin，避免 200% DPI 下被行裁切。
         int h = Math.Max(Font.Height + 12, text.Height + Theme.Scale(this, 6)) + Padding.Vertical;
         return new Size(w, h);
@@ -182,7 +186,10 @@ internal sealed class ThemeButton : Button
         int gap = withIcon ? IconGap : 0;
         int iconWidth = withIcon ? IconSize : 0;
         int contentWidth = iconWidth + gap + textSize.Width;
-        int contentLeft = bounds.Left + Math.Max(0, (bounds.Width - contentWidth) / 2);
+        // 紧凑按钮左对齐。宽度按「继续显示」锁定时，多出来的空白留在右侧，不把左边的间隔撑大。
+        int contentLeft = Compact
+            ? bounds.Left + HorizontalChrome / 2
+            : bounds.Left + Math.Max(0, (bounds.Width - contentWidth) / 2);
         if (withIcon)
             DrawGlyph(g, new Rectangle(contentLeft, bounds.Top + (bounds.Height - IconSize) / 2, IconSize, IconSize), Text, fore);
         var textRect = new Rectangle(contentLeft + iconWidth + gap, bounds.Top,
@@ -256,6 +263,19 @@ internal sealed class ThemeButton : Button
                     new PointF(x + w * .58F, y + h * .26F),
                     new PointF(x + w * .78F, y + h * .5F),
                     new PointF(x + w * .58F, y + h * .74F),
+                });
+                break;
+            case "暂停显示":   // pause bars
+                g.DrawLine(pen, x + w * .32F, y + h * .18F, x + w * .32F, y + h * .82F);
+                g.DrawLine(pen, x + w * .68F, y + h * .18F, x + w * .68F, y + h * .82F);
+                break;
+            case "继续显示":   // play
+                g.DrawLines(pen, new[]
+                {
+                    new PointF(x + w * .28F, y + h * .16F),
+                    new PointF(x + w * .28F, y + h * .84F),
+                    new PointF(x + w * .80F, y + h * .50F),
+                    new PointF(x + w * .28F, y + h * .16F),
                 });
                 break;
             case "清除窗口":   // trash

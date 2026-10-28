@@ -727,6 +727,7 @@ public sealed partial class MainForm
         center.RowStyles.Add(new RowStyle(SizeType.Absolute, ComposerHeight()));
 
         var recvHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(1), BackColor = Theme.Border };
+        _logHost = recvHost;
         recvHost.Controls.Add(_recvBox);
         center.Controls.Add(logBar, 0, 0);
         center.Controls.Add(recvHost, 0, 1);
@@ -873,23 +874,8 @@ public sealed partial class MainForm
                 _recvBox.Focus();
             }
         };
-        _pauseButton = new ThemeButton
-        {
-            Text = "暂停",
-            AutoSize = true,
-            Margin = new Padding(0, 0, 3, 0),
-        };
-        _pauseButton.Click += (_, _) => ToggleFollow();
-        var clear = ActionButton("清除", ClearReceive);
-        _rowTip.SetToolTip(clear, "清除窗口");
         _saveMenu = BuildSaveMenu();
-        var save = ActionButton("保存 ▾", null);
-        save.Click += (_, _) => _saveMenu.Show(save, new Point(0, save.Height));
-        _rowTip.SetToolTip(save, "保存数据（TXT + DAT）或另存为带颜色日志（RTF / HTML）");
         actions.Controls.Add(_searchBox);
-        actions.Controls.Add(_pauseButton);
-        actions.Controls.Add(clear);
-        actions.Controls.Add(save);
         bar.Controls.Add(actions, 1, 0);
 
         RefreshLogHeaderLayout();

@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace SscomRe;
 
-/// <summary>接收日志的分色追加、整屏重画、搜索/暂停跟随和复制。</summary>
+/// <summary>接收日志的分色追加、整屏重画、停止显示、搜索和复制。</summary>
 public sealed partial class MainForm
 {
     private const int WM_SETREDRAW = 0x000B;
@@ -21,6 +21,13 @@ public sealed partial class MainForm
     private int _renderSelStart;
     private int _renderSelLen;
     private Point _renderScroll;
+    private bool _renderClear = true;
+
+    // 停止显示：窗口保持不动，新内容先记在这里。截断发生过则 _displayHoldBase 是保留下来的整屏。
+    private bool _displayPaused;
+    private bool _displayHoldTruncated;
+    private string? _displayHoldBase;
+    private readonly StringBuilder _displayHold = new();
 
     private void AppendFormatted(string text)
     {
@@ -139,11 +146,17 @@ public sealed partial class MainForm
     /// 整屏重画：清空后按 64K 字符一块、每块一次 BeginInvoke 追加。
     /// 单块 RTF 插入只有几十毫秒，既保留分色又不会像一次插入 1M 字符那样把界面冻住。
     /// </summary>
-    private void RenderLogFromText(string text)
+    private void RenderLogFromText(string text) => BeginPaintLog(text, clear: true);
+
+    /// <summary>把大段积压追加到现有日志上，不先清空。重绘先关掉，补完一次画出。</summary>
+    private void AppendLogChunked(string text) => BeginPaintLog(text, clear: false);
+
+    private void BeginPaintLog(string text, bool clear)
     {
         if (!_recvBox.IsHandleCreated)
         {
-            _recvBox.Text = text;
+            if (clear) _recvBox.Text = text;
+            else _recvBox.AppendText(text);
             return;
         }
         _renderSelStart = _recvBox.SelectionStart;
@@ -155,9 +168,10 @@ public sealed partial class MainForm
         int token = _renderToken;
         _renderText = text;
         _renderOffset = 0;
+        _renderClear = clear;
 
         SendMessage(_recvBox.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
-        _recvBox.Clear();
+        if (clear) _recvBox.Clear();
         if (string.IsNullOrEmpty(text))
         {
             FinishRenderLog();
@@ -301,17 +315,166 @@ public sealed partial class MainForm
     /// <summary>切换 HEX/文本显示时，从对应累积缓冲整屏重画。</summary>
     private void RenderLogBuffer()
     {
+        // 累积里已经有停止期间收到的数据。先丢掉未上屏队列，避免重画结束后再追加一次。
+        DiscardUnpainted();
         RenderLogFromText(_hexDisplayBox.Checked ? _receive.HexText : _receive.TextAccum);
     }
 
-    private void ToggleFollow() => _autoScrollBox.Checked = !_autoScrollBox.Checked;
+    private void ToggleDisplayPause()
+    {
+        if (_displayPaused) ResumeDisplay();
+        else PauseDisplay();
+    }
 
-    private void SyncFollowButton()
+    private void PauseDisplay()
+    {
+        _displayPaused = true;
+        SyncDisplayPauseButton();
+        ShowToast("已暂停显示，串口仍在接收");
+    }
+
+    private void ResumeDisplay()
+    {
+        string folded = FoldQueueIntoHold();
+        if (folded.Length > 0)
+            NoteHtml(folded);
+        bool truncated = _displayHoldTruncated;
+        string held = truncated
+            ? (_displayHoldBase ?? "") + _displayHold.ToString()
+            : _displayHold.ToString();
+        _displayHoldTruncated = false;
+        _displayHoldBase = null;
+        _displayHold.Clear();
+
+        bool queueHeld = false;
+        lock (_displayLock)
+        {
+            // 折叠之后、放开闸门之前又到的段，接在积压末尾。截断则整屏以新快照为准。
+            string tail = _pendingDisplay.ToString();
+            string? tailReplace = _pendingReplace;
+            _pendingDisplay.Clear();
+            _pendingReplace = null;
+            if (tailReplace is not null)
+            {
+                truncated = true;
+                held = tailReplace + tail;
+            }
+            else if (tail.Length > 0)
+            {
+                held += tail;
+            }
+            _displayPaused = false;
+            if (_renderBusy && held.Length > 0)
+            {
+                if (tail.Length > 0)
+                    NoteHtml(tail);
+                _htmlSkip += held.Length;
+                if (truncated)
+                {
+                    _pendingReplace = held;
+                    _pendingDisplay.Clear();
+                }
+                else
+                {
+                    _pendingDisplay.Append(held);
+                }
+                _drainScheduled = true;
+                queueHeld = true;
+            }
+        }
+        if (queueHeld) StartDisplayFlush();
+        SyncDisplayPauseButton();
+        if (!queueHeld && held.Length > 0)
+        {
+            if (truncated)
+                RenderLogFromText(held);
+            else if (held.Length > RenderChunkChars)
+                AppendLogChunked(held);
+            else
+                AppendRecv(held, recordHtml: false);
+        }
+        if (truncated)
+            ShowToast("暂停期间数据超过显示缓冲上限，已补上保留的内容");
+        else if (held.Length > 0)
+            ShowToast("已补上暂停期间的内容");
+        else
+            ShowToast("已继续显示");
+    }
+
+    /// <summary>两种文字宽度取较大值后固定，避免切换时把所在行和菜单栏重新排一遍。</summary>
+    private void LockPauseButtonWidth()
     {
         if (_pauseButton is null) return;
-        _pauseButton.Text = _autoScrollBox.Checked ? "暂停" : "继续";
-        _pauseButton.Kind = _autoScrollBox.Checked ? ThemeButton.ButtonKind.Default : ThemeButton.ButtonKind.Outline;
+        string keep = _pauseButton.Text;
+        _pauseButton.AutoSize = true;
+        _pauseButton.Text = "暂停显示";
+        Size pause = _pauseButton.GetPreferredSize(Size.Empty);
+        _pauseButton.Text = "继续显示";
+        Size resume = _pauseButton.GetPreferredSize(Size.Empty);
+        _pauseButton.AutoSize = false;
+        _pauseButton.Size = new Size(Math.Max(pause.Width, resume.Width), Math.Max(pause.Height, resume.Height));
+        _pauseButton.Text = keep;
+    }
+
+    private void SyncDisplayPauseButton()
+    {
+        if (_pauseButton is null) return;
+        _pauseButton.Text = _displayPaused ? "继续显示" : "暂停显示";
+        _pauseButton.Kind = _displayPaused ? ThemeButton.ButtonKind.Outline : ThemeButton.ButtonKind.Default;
+        _rowTip.SetToolTip(_pauseButton, _displayPaused
+            ? "把暂停期间收到的内容补到窗口里。"
+            : "窗口停止刷新。接收、计数和写文件都继续，再点一次把刚才的内容补上。");
         _pauseButton.Invalidate();
+    }
+
+    /// <summary>接收队列里还没画的段，并入停止显示的积压。截断快照会换掉之前积压的增量。</summary>
+    private void AbsorbDisplayHold(string text, string? replace, bool recordHtml = false)
+    {
+        if (recordHtml && text.Length > 0)
+            NoteHtml(text);
+        if (replace is not null)
+        {
+            _displayHoldTruncated = true;
+            _displayHoldBase = replace;
+            _displayHold.Clear();
+        }
+        if (text.Length > 0)
+            _displayHold.Append(text);
+    }
+
+    private string FoldQueueIntoHold()
+    {
+        TakePending(out string text, out string? replace);
+        if (text.Length > 0 || replace is not null)
+            AbsorbDisplayHold(text, replace);
+        return text;
+    }
+
+    private void DiscardUnpainted()
+    {
+        lock (_displayLock)
+        {
+            _pendingDisplay.Clear();
+            _pendingReplace = null;
+            _drainScheduled = false;
+        }
+        _displayTimer.Stop();
+        _displayHoldTruncated = false;
+        _displayHoldBase = null;
+        _displayHold.Clear();
+    }
+
+    /// <summary>
+    /// 窗口里能看到的，加上停止显示还没画上的。发生过截断时，冻结的旧画面已经不算数。
+    /// </summary>
+    private string LogicalWindowText()
+    {
+        CompletePendingRenderLog();
+        if (_displayPaused) FoldQueueIntoHold();
+        string raw = _displayPaused && _displayHoldTruncated
+            ? (_displayHoldBase ?? "") + _displayHold.ToString()
+            : _recvBox.Text + (_displayPaused ? _displayHold.ToString() : "");
+        return raw.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n");
     }
 
     private void SearchNext(bool forward)
@@ -325,6 +488,8 @@ public sealed partial class MainForm
             return;
         }
         CompletePendingRenderLog();            // 分块重画期间控件里只有部分日志
+        if (_displayPaused) FoldQueueIntoHold();
+        bool hidden = _displayPaused && (_displayHold.Length > 0 || _displayHoldTruncated);
         ClearSearchHighlight();
         RichTextBoxFinds options = forward ? RichTextBoxFinds.None : RichTextBoxFinds.Reverse;
         int start = forward
@@ -336,7 +501,7 @@ public sealed partial class MainForm
         if (index < 0)
         {
             string shown = query.Length > 24 ? query.Substring(0, 24) + "…" : query;
-            ShowToast("未找到「" + shown + "」", ToastTone.Warning);
+            ShowToast("未找到「" + shown + "」" + (hidden ? "。未显示的内容不在搜索范围内" : ""), ToastTone.Warning);
             return;
         }
         HideToast();
@@ -426,7 +591,14 @@ public sealed partial class MainForm
         };
         var clear = new ToolStripMenuItem("清除窗口");
         clear.Click += (_, _) => ClearReceive();
-        menu.Items.AddRange(new ToolStripItem[] { copy, plain, new ToolStripSeparator(), all, clear });
+        var rtf = new ToolStripMenuItem("另存为带颜色日志（RTF）...");
+        rtf.Click += (_, _) => SaveColoredLogRtf();
+        var html = new ToolStripMenuItem("另存为带颜色日志（HTML）...");
+        html.Click += (_, _) => SaveColoredLogHtml();
+        menu.Items.AddRange(new ToolStripItem[]
+        {
+            copy, plain, new ToolStripSeparator(), all, clear, new ToolStripSeparator(), rtf, html,
+        });
         Theme.StyleContextMenu(menu);
         return menu;
     }
@@ -454,6 +626,8 @@ public sealed partial class MainForm
 
     internal void PrepareLogBenchmark(bool hex)
     {
+        _displayPaused = false;
+        SyncDisplayPauseButton();
         _displayTimer.Stop();
         ClearReceive();
         HideToast();
@@ -501,6 +675,34 @@ public sealed partial class MainForm
     internal void CompletePendingRenderLogForTest() => CompletePendingRenderLog();
     internal bool AutoScrollEnabledForTest => _autoScrollBox?.Checked == true;
     internal void SetAutoScrollForTest(bool enabled) => _autoScrollBox.Checked = enabled;
+    internal bool DisplayPausedForTest => _displayPaused;
+    internal void SetDisplayPausedForTest(bool paused)
+    {
+        if (paused == _displayPaused) return;
+        if (paused) PauseDisplay();
+        else ResumeDisplay();
+    }
+    internal void SetDisplayLimitForTest(int limit)
+    {
+        _displayLimit = limit;
+        _receive.Limit = limit;
+    }
+    internal string LogicalWindowTextForTest() => LogicalWindowText();
+    internal void SimulateIncomingForTest(byte[] data)
+    {
+        bool file = _snapRecvToFile;
+        _snapRecvToFile = false;
+        try
+        {
+            HandleIncoming(data);
+            DrainDisplay();
+        }
+        finally
+        {
+            _snapRecvToFile = file;
+        }
+    }
+    internal void ClearReceiveForTest() => ClearReceive();
 
     internal bool SearchForTest(string query)
     {
