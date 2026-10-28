@@ -23,6 +23,7 @@ public sealed partial class MainForm : Form
     private readonly List<ToolStripMenuItem> _limitItems = new();
     private ThemeTextBox _searchBox = null!;
     private ThemeButton _pauseButton = null!;
+    private string _saveDataDirectory = "";
     private int _searchStart = -1;
     private int _searchLength;
     private ToolStripStatusLabel _rxRateLabel = null!;
@@ -43,6 +44,7 @@ public sealed partial class MainForm : Form
     private CheckBox _dtrBox = null!;
     private Button _moreSettingsButton = null!;
     private RichTextBox _recvBox = null!;
+    private Panel _logHost = null!;
     private TextBox _sendBox = null!;
     private Button _sendButton = null!;
     private CheckBox _hexDisplayBox = null!;
@@ -300,7 +302,11 @@ public sealed partial class MainForm : Form
             ScheduleResponsiveRelayout();
             ScheduleScrollRecvToLatest();
         };
-        DpiChanged += (_, _) => ScheduleScrollRecvToLatest();
+        DpiChanged += (_, _) =>
+        {
+            LockPauseButtonWidth();
+            ScheduleScrollRecvToLatest();
+        };
         Activated += (_, _) => ScheduleScrollRecvToLatest();
         Move += (_, _) =>
         {
@@ -605,13 +611,32 @@ public sealed partial class MainForm : Form
         _newLineBox = Cb("加回车换行");
         Put(row, _newLineBox);
         _autoScrollBox = Cb("自动滚动", true);
-        _rowTip.SetToolTip(_autoScrollBox, "接收日志自动滚动到最新内容");
-        _autoScrollBox.CheckedChanged += (_, _) =>
-        {
-            SyncFollowButton();
-            ScheduleScrollRecvToLatest();
-        };
+        _rowTip.SetToolTip(_autoScrollBox, "勾选时日志自动滚到最新。取消后仍继续接收，只是不再跳到最后一行。");
+        _autoScrollBox.CheckedChanged += (_, _) => ScheduleScrollRecvToLatest();
         Put(row, _autoScrollBox);
+        var rowMargin = new Padding(3, 2, 2, 2);
+        _pauseButton = new ThemeButton { Text = "暂停显示", AutoSize = true, Compact = true };
+        _pauseButton.Click += (_, _) => ToggleDisplayPause();
+        _pauseButton.HandleCreated += (_, _) => LockPauseButtonWidth();
+        Put(row, _pauseButton);
+        _pauseButton.Margin = rowMargin;
+        var clearWindow = new ThemeButton { Text = "清除窗口", AutoSize = true, Compact = true };
+        clearWindow.Click += (_, _) => ClearReceive();
+        _rowTip.SetToolTip(clearWindow, "清除窗口、计数，以及还没显示的内容");
+        Put(row, clearWindow);
+        clearWindow.Margin = rowMargin;
+        var saveData = new ThemeButton
+        {
+            Text = "保存数据",
+            AutoSize = true,
+            Compact = true,
+            Kind = ThemeButton.ButtonKind.Soft,
+        };
+        saveData.Click += (_, _) => SaveData();
+        _rowTip.SetToolTip(saveData, "选择目录后保存原始数据和窗口内容");
+        Put(row, saveData);
+        saveData.Margin = rowMargin;
+        SyncDisplayPauseButton();
 
         row.MarkRightGroup();
         _recvSettingsButton = SettingButton("接收设置 ▾");
@@ -1850,8 +1875,29 @@ public sealed partial class MainForm : Form
     {
         // 整屏重画进行中：先不动接收框，数据留在队列里，画完再追平。
         if (_renderBusy) return;
-        string text;
-        string? replace;
+        TakePending(out string text, out string? replace);
+        if (_displayPaused)
+        {
+            if (text.Length > 0 || replace is not null)
+                AbsorbDisplayHold(text, replace);
+            StopDisplayTimerIfIdle();
+            return;
+        }
+        if (replace is not null)
+        {
+            RenderLogFromText(replace);             // 截断后的整屏重画（保留分色）
+            if (text.Length > 0)
+                EnqueueDisplay(text, null);         // 截断之后才到的段，等重画完再补上
+        }
+        else if (text.Length > 0)
+        {
+            AppendRecv(text);
+        }
+        StopDisplayTimerIfIdle();
+    }
+
+    private void TakePending(out string text, out string? replace)
+    {
         lock (_displayLock)
         {
             text = _pendingDisplay.ToString();
@@ -1859,14 +1905,10 @@ public sealed partial class MainForm : Form
             replace = _pendingReplace;
             _pendingReplace = null;
         }
-        if (replace is not null)
-        {
-            RenderLogFromText(replace);             // 截断后的整屏重画（保留分色）
-        }
-        else if (text.Length > 0)
-        {
-            AppendRecv(text);
-        }
+    }
+
+    private void StopDisplayTimerIfIdle()
+    {
         bool idle;
         lock (_displayLock)
         {
@@ -1887,6 +1929,17 @@ public sealed partial class MainForm : Form
     private void AppendRecv(string text)
     {
         if (text.Length == 0) return;
+        if (_displayPaused)
+        {
+            AbsorbDisplayHold(text, null);
+            return;
+        }
+        // 整屏重画还没画完时先排队，避免插进半屏中间，也避免和“清空再画”打架。
+        if (_renderBusy)
+        {
+            EnqueueDisplay(text, null);
+            return;
+        }
         if (!_recvBox.IsHandleCreated)
         {
             _recvBox.AppendText(text);
@@ -2080,6 +2133,7 @@ public sealed partial class MainForm : Form
     private void ClearReceive()
     {
         CancelRenderLog();                    // 终止未完成的整屏重画并恢复重绘
+        DiscardUnpainted();                   // 停止显示期间积压的内容一并丢掉
         ClearSearchHighlight();
         _recvBox.Clear();
         _receive.Clear();                     // 三个累积串与半字节状态一并清空
@@ -2089,19 +2143,23 @@ public sealed partial class MainForm : Form
         ShowToast("已清除接收区");
     }
 
-    /// <summary>保存数据：接收窗口内容另存为 SaveWindows 时间戳 .TXT；原始接收缓冲写成 SAVE 时间戳 .DAT。</summary>
+    /// <summary>保存数据：选定目录后直接写 SaveWindows 时间戳 .TXT 和 SAVE 时间戳 .DAT。</summary>
     private void SaveData()
     {
         CompletePendingRenderLog();                        // 保存的是完整窗口内容，不能是半屏
-        string dir = Directory.GetCurrentDirectory();      // 规格：当前目录
+        string initial = _saveDataDirectory.Length > 0 && Directory.Exists(_saveDataDirectory)
+            ? _saveDataDirectory
+            : Directory.GetCurrentDirectory();
+        string? directory = SaveDataDialog.Choose(this, initial);
+        if (directory is null) return;
+        _saveDataDirectory = directory;
         string dt = SendComposer.FileTimestamp();
-        string datPath = Path.Combine(dir, "SAVE" + dt + ".DAT");
-        string txtPath = Path.Combine(dir, "SaveWindows" + dt + ".TXT");
+        string datPath = Path.Combine(directory, "SAVE" + dt + ".DAT");
+        string txtPath = Path.Combine(directory, "SaveWindows" + dt + ".TXT");
 
         try
         {
-            string windowText = _recvBox.Text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n");
-            File.WriteAllBytes(txtPath, SendComposer.EncodeGbk(windowText));   // 窗口内容（原程序用 Lines.SaveToFile）
+            File.WriteAllBytes(txtPath, SendComposer.EncodeGbk(LogicalWindowText()));   // 含停止显示期间还没画上的内容
         }
         catch
         {
@@ -2114,13 +2172,13 @@ public sealed partial class MainForm : Form
         }
         catch
         {
-            MessageBox.Show(this, "当前目录不可写!请拷贝exe文件到且它目录试试.", "保存数据",
+            MessageBox.Show(this, "目录不可写!请另选一个目录试试.", "保存数据",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
         MessageBox.Show(this,
-            "收到的原始数据已保存在当前目录!,文件名:\r\n" + datPath
+            "收到的原始数据已保存,文件名:\r\n" + datPath
             + "\r\n接收窗口显示的内容保存在:\r\n" + txtPath,
             "保存数据", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }

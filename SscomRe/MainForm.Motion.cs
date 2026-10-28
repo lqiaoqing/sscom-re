@@ -13,7 +13,8 @@ public sealed partial class MainForm
     private void BuildToast()
     {
         _toast = new ToastPanel { Visible = false };
-        Controls.Add(_toast);
+        // 挂在日志区上。若挂到窗体，显示时会带动主菜单重新停靠，菜单栏会抖一下。
+        _logHost.Controls.Add(_toast);
     }
 
     private void WireMotion()
@@ -47,15 +48,12 @@ public sealed partial class MainForm
 
     private void PositionToast()
     {
-        if (_toast is null || _recvBox is null || !_recvBox.IsHandleCreated) return;
-        Point log = PointToClient(_recvBox.PointToScreen(Point.Empty));
+        Control host = _toast.Parent ?? _logHost;
+        if (host is null || !host.IsHandleCreated) return;
         int margin = Theme.Scale(this, 12);
-        int x = log.X + Math.Max(margin, (_recvBox.Width - _toast.Width) / 2);
-        int y = log.Y + _recvBox.Height - _toast.Height - margin;
-        int maxX = Math.Max(margin, ClientSize.Width - _toast.Width - margin);
-        int maxY = Math.Max(margin, ClientSize.Height - _toast.Height - margin);
-        _toast.Location = new Point(Math.Min(Math.Max(margin, x), maxX),
-            Math.Min(Math.Max(margin, y), maxY));
+        int x = Math.Max(margin, (host.ClientSize.Width - _toast.Width) / 2);
+        int y = host.ClientSize.Height - _toast.Height - margin;
+        _toast.Location = new Point(x, Math.Max(margin, y));
     }
 
 }

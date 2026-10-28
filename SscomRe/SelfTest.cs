@@ -678,6 +678,58 @@ internal static class SelfTest
                 CheckText("尺寸变化后仍跟随到底部", form.RecvAtBottomForTest() ? "yes" : "no", "yes");
                 form.Size = before;
                 Application.DoEvents();
+
+                const string anchor = "PAUSE-ANCHOR-9f3c";
+                const string heldTail = "HELD-TAIL-9f3c";
+                form.AppendLogForTest(anchor);
+                Application.DoEvents();
+                int frozen = recv.TextLength;
+                form.SetDisplayPausedForTest(true);
+                form.AppendLogForTest(heldTail);
+                Application.DoEvents();
+                CheckText("停止显示时窗口不刷新", recv.TextLength.ToString(), frozen.ToString());
+                CheckText("停止显示时新内容记在旁边", form.LogicalWindowTextForTest().Contains(heldTail) ? "yes" : "no", "yes");
+                CheckText("停止显示时画面不含新内容", recv.Text.Contains(heldTail) ? "yes" : "no", "no");
+                form.SetDisplayPausedForTest(false);
+                form.CompletePendingRenderLogForTest();
+                Application.DoEvents();
+                CheckText("继续显示后补上内容", recv.Text.Contains(heldTail) ? "yes" : "no", "yes");
+                CheckText("继续显示后旧内容还在", recv.Text.Contains(anchor) ? "yes" : "no", "yes");
+
+                form.SetDisplayPausedForTest(true);
+                int frozenBig = recv.TextLength;
+                form.AppendLogForTest(new string('Q', 70_000));
+                CheckText("大段停止显示不进窗口", recv.TextLength.ToString(), frozenBig.ToString());
+                form.SetDisplayPausedForTest(false);
+                CheckText("大段恢复走分块补画", form.RenderLogBusyForTest ? "yes" : "no", "yes");
+                form.CompletePendingRenderLogForTest();
+                Application.DoEvents();
+                CheckText("大段恢复后长度增加", recv.TextLength == frozenBig + 70_000 ? "yes" : "no", "yes");
+                CheckText("大段恢复后旧内容还在", recv.Text.Contains(anchor) ? "yes" : "no", "yes");
+
+                const string visible = "VISIBLE-MARKER-9f3c";
+                form.AppendLogForTest(visible);
+                form.SetDisplayPausedForTest(true);
+                form.SetDisplayLimitForTest(32);
+                try
+                {
+                    form.SimulateIncomingForTest(Enumerable.Repeat((byte)'B', 128).ToArray());
+                    CheckText("超限时窗口仍停着", recv.Text.Contains(visible) ? "yes" : "no", "yes");
+                    CheckText("超限后逻辑文本丢掉旧画面", form.LogicalWindowTextForTest().Contains(visible) ? "yes" : "no", "no");
+                    form.SetDisplayPausedForTest(false);
+                    form.CompletePendingRenderLogForTest();
+                    Application.DoEvents();
+                    CheckText("超限恢复后窗口换成保留内容", recv.Text.Contains(visible) ? "yes" : "no", "no");
+                    CheckText("超限恢复后有新数据", recv.TextLength > 0 ? "yes" : "no", "yes");
+                }
+                finally
+                {
+                    form.SetDisplayLimitForTest(1_000_000);
+                    if (form.DisplayPausedForTest) form.SetDisplayPausedForTest(false);
+                    form.CompletePendingRenderLogForTest();
+                    form.ClearReceiveForTest();
+                    form.HideToastForTest();
+                }
             }
             CheckText("搜索无结果提示", form.SearchForTest("definitely-not-in-log") ? "yes" : "no", "yes");
             form.HideToastForTest();
@@ -905,6 +957,39 @@ internal static class SelfTest
                     CheckText("展开后宽度恢复", form.SidebarColumnWidthForTest.ToString(), form.SidebarExpandedWidthForTest.ToString());
                 }
             }
+            foreach (var c in AllControls(form))
+                if (c is Button { Text: "隐藏" } hideMulti) hideMulti.PerformClick();
+            int layoutScale = Math.Max(96, form.DeviceDpi);
+            form.Size = new Size(1200 * layoutScale / 96, 720 * layoutScale / 96);
+            Application.DoEvents();
+            CheckBox? autoScroll = null;
+            Button? pauseDisplay = null;
+            Button? clearWindow = null;
+            Button? saveData = null;
+            foreach (var c in AllControls(form))
+            {
+                if (c is CheckBox { Text: "自动滚动" } box) autoScroll = box;
+                if (c is Button { Text: "暂停显示" } pause) pauseDisplay = pause;
+                if (c is Button { Text: "清除窗口" } clear) clearWindow = clear;
+                if (c is Button { Text: "保存数据" } save) saveData = save;
+            }
+            bool SameRow(Control? a, Control? b) =>
+                a is not null && b is not null &&
+                Math.Abs(a.PointToScreen(Point.Empty).Y - b.PointToScreen(Point.Empty).Y) < Math.Max(8, a.Height);
+            CheckText("有暂停显示", pauseDisplay is null ? "no" : "yes", "yes");
+            CheckText("有清除窗口", clearWindow is null ? "no" : "yes", "yes");
+            CheckText("有保存数据", saveData is null ? "no" : "yes", "yes");
+            CheckBox? hexDisplay = null;
+            foreach (var c in AllControls(form))
+                if (c is CheckBox { Text: "HEX显示" } box) hexDisplay = box;
+            CheckText("暂停显示与自动滚动同一行", SameRow(autoScroll, pauseDisplay) ? "yes" : "no", "yes");
+            CheckText("清除窗口与自动滚动同一行", SameRow(autoScroll, clearWindow) ? "yes" : "no", "yes");
+            CheckText("保存数据与自动滚动同一行", SameRow(autoScroll, saveData) ? "yes" : "no", "yes");
+            CheckText("自动滚动与 HEX显示 同一行", SameRow(hexDisplay, autoScroll) ? "yes" : "no", "yes");
+            int saveGap = saveData is null || clearWindow is null
+                ? -1
+                : saveData.PointToScreen(Point.Empty).X - (clearWindow.PointToScreen(Point.Empty).X + clearWindow.Width);
+            CheckText("保存数据紧跟清除窗口", saveGap is >= 0 and <= 24 ? "yes" : saveGap.ToString(), "yes");
             form.Close();
             // Close 会保存测试中改过的字体/模式/几何；收尾时还原用户原配置。
             if (iniBackup is not null) File.WriteAllBytes(ini, iniBackup);
