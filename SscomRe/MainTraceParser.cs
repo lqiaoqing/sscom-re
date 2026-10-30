@@ -64,6 +64,40 @@ internal sealed record MainTraceLinkStage(
     string Sub,
     MainTraceLinkState State);
 
+internal sealed record MainTraceDownlink(
+    DateTime Time,
+    long Tick,
+    string Topic,
+    string Summary,
+    int Bytes,
+    string Payload,
+    string Raw,
+    string State = "已收到");
+
+/// <summary>业务时间线用的聚合事件：一次报文只保留一行结果，不展开编码/提交/API 阶段。</summary>
+internal sealed record MainTraceTimelineItem(
+    DateTime Time,
+    long Tick,
+    MainTraceEventKind Kind,
+    string Direction,
+    string Text,
+    string Source,
+    string Raw,
+    bool Alert)
+{
+    public string Tag => Kind switch
+    {
+        MainTraceEventKind.Report => "报文",
+        MainTraceEventKind.State => "状态",
+        MainTraceEventKind.Sensor => "传感器",
+        MainTraceEventKind.Camera => "拍照",
+        MainTraceEventKind.Alert => "异常",
+        MainTraceEventKind.Network => "网络",
+        MainTraceEventKind.Downlink => "报文",
+        _ => "本机",
+    };
+}
+
 internal sealed record MainTraceBindingInfo(
     int TpmsBound,
     int ThsBound,
@@ -207,7 +241,9 @@ internal sealed record MainTraceReport
     public int Bytes { get; init; }
     public string Topic { get; init; } = "";
     public string PayloadJson { get; init; } = "";
+    public string MaskedPayload { get; init; } = "";
     public bool JsonComplete { get; init; }
+    public double? SocPower { get; init; }
 
     public double? BatteryVoltage { get; init; }
     public double? BatteryPercent { get; init; }
@@ -307,6 +343,8 @@ internal sealed record MainTraceView
     public MainTraceSnapshot Snapshot { get; init; } = MainTraceSnapshot.Empty;
     public IReadOnlyList<MainTraceEvent> Events { get; init; } = Array.Empty<MainTraceEvent>();
     public IReadOnlyList<MainTraceReport> Reports { get; init; } = Array.Empty<MainTraceReport>();
+    public IReadOnlyList<MainTraceDownlink> Downlinks { get; init; } = Array.Empty<MainTraceDownlink>();
+    public IReadOnlyList<MainTraceTimelineItem> Timeline { get; init; } = Array.Empty<MainTraceTimelineItem>();
     public IReadOnlyList<MainTraceLinkStage> LinkStages { get; init; } = Array.Empty<MainTraceLinkStage>();
     public IReadOnlyList<string> Alerts { get; init; } = Array.Empty<string>();
     public MainTraceBindingInfo Bindings { get; init; } = MainTraceBindingInfo.Empty;
@@ -329,6 +367,7 @@ internal sealed record MainTraceView
 
     public MainTraceReport? LastReport => Reports.Count > 0 ? Reports[0] : null;
     public int ReportCount => Reports.Count;
+    public int DownlinkMessageCount => Downlinks.Count;
     public int ReportSuccessCount => Reports.Count(report => report.BusinessSuccess);
     public int ReportUnobservedCount =>
         Reports.Count(report => report.Outcome == MainTraceReportOutcome.ApiReturned);
@@ -382,6 +421,7 @@ internal sealed class MainTraceParser
     private readonly StringBuilder _current = new();
     private readonly List<MainTraceEvent> _events = new();
     private readonly List<MainTraceReport> _reports = new();
+    private readonly List<MainTraceDownlink> _downlinks = new();
     private readonly Dictionary<string, int> _socErrors = new(StringComparer.Ordinal);
     private readonly JavaScriptSerializer _json = new()
     {
@@ -416,6 +456,7 @@ internal sealed class MainTraceParser
             _hasCurrent = false;
             _events.Clear();
             _reports.Clear();
+            _downlinks.Clear();
             _socErrors.Clear();
             _snapshot = MainTraceSnapshot.Empty;
             _lastCharTick = 0;
@@ -466,17 +507,21 @@ internal sealed class MainTraceParser
         {
             FlushIfIdleLocked();
             MainTraceReport[] reports = _reports.ToArray();
+            MainTraceDownlink[] downlinks = _downlinks.ToArray();
+            MainTraceEvent[] events = _events.ToArray();
             MainTraceReport? last = reports.Length > 0 ? reports[0] : null;
             var alerts = BuildAlerts(last);
             return new MainTraceView
             {
                 Snapshot = _snapshot,
-                Events = _events.ToArray(),
+                Events = events,
                 Reports = reports,
+                Downlinks = downlinks,
+                Timeline = BuildTimeline(reports, downlinks, events),
                 LinkStages = BuildLinkStages(_snapshot, last),
                 Alerts = alerts,
                 Bindings = _bindings,
-                HasData = _snapshot.HasData || _snapshots > 0 || _events.Count > 0,
+                HasData = _snapshot.HasData || _snapshots > 0 || _events.Count > 0 || _downlinks.Count > 0,
                 SessionStarted = _sessionStarted,
                 LastUpdate = _lastUpdate,
                 SnapshotCount = _snapshots,
@@ -873,23 +918,22 @@ internal sealed class MainTraceParser
         }
         if (text.IndexOf("receive new cfg:", StringComparison.Ordinal) >= 0)
         {
-            _downlinkCount++;
-            AddEvent(MainTraceEventKind.Downlink, "下发配置 · " + Short(After(text, "receive new cfg:"), 80),
-                "固件观察", raw);
+            AddDownlink(now, tick, "trkcfg", "设备配置", After(text, "receive new cfg:"), raw);
             return;
         }
         if (text.IndexOf("receive new cmd:", StringComparison.Ordinal) >= 0)
         {
-            _downlinkCount++;
-            AddEvent(MainTraceEventKind.Downlink, "下发命令 · " + Short(After(text, "receive new cmd:"), 80),
-                "固件观察", raw);
+            string payload = After(text, "receive new cmd:");
+            string summary = payload.IndexOf("SnapShot", StringComparison.OrdinalIgnoreCase) >= 0 ? "SnapShot"
+                : payload.IndexOf("Record", StringComparison.OrdinalIgnoreCase) >= 0 ? "Record"
+                : payload.IndexOf("LiveStream", StringComparison.OrdinalIgnoreCase) >= 0 ? "LiveStream"
+                : Short(payload, 32);
+            AddDownlink(now, tick, "cmd", summary.Length > 0 ? summary : "命令", payload, raw);
             return;
         }
         if (text.IndexOf("receive new upgrade:", StringComparison.Ordinal) >= 0)
         {
-            _downlinkCount++;
-            AddEvent(MainTraceEventKind.Downlink, "下发升级 · " + Short(After(text, "receive new upgrade:"), 80),
-                "固件观察", raw);
+            AddDownlink(now, tick, "upgrade", "升级请求", After(text, "receive new upgrade:"), raw);
             return;
         }
         if (text.IndexOf("Mainstate ", StringComparison.Ordinal) >= 0)
@@ -1045,8 +1089,7 @@ internal sealed class MainTraceParser
             return;
         }
 
-        if (text.IndexOf("fail", StringComparison.OrdinalIgnoreCase) >= 0
-            || text.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0)
+        if (LooksLikeError(text))
         {
             AddEvent(MainTraceEventKind.Alert, Short(text, 110), "设备日志", raw, true);
         }
@@ -1060,6 +1103,7 @@ internal sealed class MainTraceParser
             EncodedTick = tick,
             Bytes = bytes,
             PayloadJson = json,
+            MaskedPayload = SanitizeRaw(json),
         };
         if (json.Length == 0) return report;
         try
@@ -1077,6 +1121,7 @@ internal sealed class MainTraceParser
                 Longitude = Number(Path(obj, "gps", "lng")),
                 Hdop = Number(Path(obj, "gps", "hdop")),
                 Mileage = Number(Path(obj, "stats", "mileage")),
+                SocPower = Number(Path(obj, "SoC", "SoC_status")),
                 Band = Text(Path(obj, "nwinfo", "band")),
                 Lac = Text(Path(obj, "nwinfo", "lac")),
                 Cid = Text(Path(obj, "nwinfo", "cid")),
@@ -1128,6 +1173,81 @@ internal sealed class MainTraceParser
         if (index >= 0) _reports[index] = replacement;
     }
 
+    private void AddDownlink(DateTime time, long tick, string topic, string summary, string payload, string raw)
+    {
+        _downlinkCount++;
+        string clean = SanitizeRaw(payload.Trim());
+        int bytes = Encoding.UTF8.GetByteCount(clean);
+        _downlinks.Insert(0, new MainTraceDownlink(time, tick, topic, summary,
+            bytes, clean, Short(raw, 500)));
+        while (_downlinks.Count > MaxReports) _downlinks.RemoveAt(_downlinks.Count - 1);
+        string label = topic switch
+        {
+            "cmd" => "下发命令",
+            "upgrade" => "下发升级",
+            _ => "下发配置",
+        };
+        AddEvent(MainTraceEventKind.Downlink, label + " · " + Short(summary, 80), "固件观察", raw);
+    }
+
+    private List<MainTraceTimelineItem> BuildTimeline(MainTraceReport[] reports,
+        MainTraceDownlink[] downlinks, MainTraceEvent[] events)
+    {
+        var items = new List<MainTraceTimelineItem>();
+        foreach (MainTraceReport report in reports)
+        {
+            DateTime when = report.BusinessSuccessAt ?? report.ApiAt ?? report.SubmittedAt ?? report.EncodedAt;
+            string result = report.Outcome switch
+            {
+                MainTraceReportOutcome.Success => "发布成功",
+                MainTraceReportOutcome.ApiReturned => "结果未观测",
+                MainTraceReportOutcome.Submitted => "已提交",
+                MainTraceReportOutcome.Failed => "失败",
+                MainTraceReportOutcome.Encoded => "已编码",
+                _ => "编码中",
+            };
+            string text = "↑ report " + report.Bytes + " B · " + result;
+            string evidence = report.Outcome switch
+            {
+                MainTraceReportOutcome.Success =>
+                    "gps payload pubilsh success · " + report.Topic + " · " + report.Bytes + " B",
+                MainTraceReportOutcome.ApiReturned =>
+                    "API " + report.ApiResult + " · 业务成功日志未观测",
+                MainTraceReportOutcome.Failed => "publish failed · " + report.Failure,
+                MainTraceReportOutcome.Submitted =>
+                    "mqtt publish enter ok · " + report.Topic,
+                MainTraceReportOutcome.Encoded => "encode report ok(" + report.Bytes + ")",
+                _ => "encode report ok(" + report.Bytes + ")",
+            };
+            items.Add(new MainTraceTimelineItem(when, report.EncodedTick, MainTraceEventKind.Report,
+                "↑", text, "固件观察", evidence, false));
+        }
+        foreach (MainTraceDownlink downlink in downlinks)
+        {
+            items.Add(new MainTraceTimelineItem(downlink.Time, downlink.Tick, MainTraceEventKind.Report,
+                "↓", "↓ " + downlink.Topic + " " + downlink.Summary + " · 已收到",
+                "固件观察", downlink.Payload, false));
+        }
+        foreach (MainTraceEvent ev in events)
+        {
+            if (ev.Kind is MainTraceEventKind.Report or MainTraceEventKind.Downlink) continue;
+            // 报文阶段已合并为一条；常规 MQTT/模组翻转不刷时间线，保留配置和异常。
+            if (ev.Kind == MainTraceEventKind.Network
+                && ev.Text.IndexOf("配置写入", StringComparison.Ordinal) < 0) continue;
+            if (ev.Kind == MainTraceEventKind.State
+                && !ev.Text.StartsWith("主状态 ", StringComparison.Ordinal)
+                && !ev.Text.StartsWith("子状态 ", StringComparison.Ordinal)
+                && !ev.Text.StartsWith("收到首帧", StringComparison.Ordinal)) continue;
+            items.Add(new MainTraceTimelineItem(ev.Time, ev.Tick, ev.Kind, "", ev.Text, ev.Source, ev.Raw, ev.Alert));
+        }
+        items.Sort((a, b) =>
+        {
+            int byTime = b.Time.CompareTo(a.Time);
+            return byTime != 0 ? byTime : b.Tick.CompareTo(a.Tick);
+        });
+        return items.Count > MaxEvents ? items.GetRange(0, MaxEvents) : items;
+    }
+
     private void AddEvent(MainTraceEventKind kind, string text, string source, string raw, bool alert = false)
     {
         _events.Insert(0, new MainTraceEvent(DateTime.Now, Stopwatch.GetTimestamp(), kind,
@@ -1141,7 +1261,7 @@ internal sealed class MainTraceParser
         var alerts = new List<string>();
         if (!_snapshot.HasData && _snapshots == 0)
         {
-            alerts.Add("等待 VS2310 主日志数据");
+            alerts.Add("等待主日志数据");
             return alerts;
         }
         if (_socErrors.Count > 0)
@@ -1383,6 +1503,15 @@ internal sealed class MainTraceParser
         });
         return clean.Length > 2000 ? clean.Substring(0, 2000) + "…" : clean;
     }
+
+    private static bool LooksLikeError(string text) =>
+        text.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0
+        || text.IndexOf("failure", StringComparison.OrdinalIgnoreCase) >= 0
+        || text.IndexOf(" error", StringComparison.OrdinalIgnoreCase) >= 0
+        || text.IndexOf("Error:", StringComparison.OrdinalIgnoreCase) >= 0
+        || text.IndexOf("错误", StringComparison.Ordinal) >= 0
+        || text.IndexOf("超时", StringComparison.Ordinal) >= 0
+        || text.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0;
 
     private static string Short(string text, int max) =>
         text.Length <= max ? text : text.Substring(0, max) + "…";

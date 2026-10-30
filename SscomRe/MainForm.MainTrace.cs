@@ -62,6 +62,10 @@ public sealed partial class MainForm
     internal string MainTraceSummaryForTest => _mainTraceWindow?.SummaryForTest ?? "";
     internal bool MainTracePausedForTest => _mainTraceWindow?.PausedForTest ?? false;
     internal void ToggleMainTracePauseForTest() => _mainTraceWindow?.TogglePauseForTest();
+    internal void MainTraceShowDownForTest() => _mainTraceWindow?.ShowDownForTest();
+    internal void MainTraceShowUpForTest() => _mainTraceWindow?.ShowUpForTest();
+    internal void MainTraceCycleLimitForTest() => _mainTraceWindow?.CycleLimitForTest();
+    internal string MainTraceMessageStateForTest => _mainTraceWindow?.MessageStateForTest ?? "";
     internal string MainTraceSourceLabelForTest => MainTraceSourceLabel();
     internal Bitmap? RenderMainTraceForTest() => _mainTraceWindow?.RenderForTest();
 

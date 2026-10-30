@@ -979,6 +979,18 @@ internal static class SelfTest
             CheckText("MT 上报原文 ICCID 脱敏",
                 view.Events.Any(e => e.Raw.Contains("8933…6419")) ? "yes" : "no", "yes");
             CheckText("MT 下发计数", view.DownlinkCount.ToString(), "1");
+            CheckText("MT 下行报文", view.Downlinks.Count + "/" + view.Downlinks[0].Topic + "/" + view.Downlinks[0].Summary,
+                "1/cmd/SnapShot");
+            CheckText("MT 时间线报文合并",
+                view.Timeline.Count(i => i.Kind == MainTraceEventKind.Report).ToString(),
+                (view.Reports.Count + view.Downlinks.Count).ToString());
+            CheckText("MT 时间线无阶段明细",
+                view.Timeline.Any(i => i.Text.StartsWith("编码 ") || i.Text.StartsWith("提交 MQTT")
+                    || i.Text.StartsWith("发布 API")) ? "yes" : "no", "no");
+            CheckText("MT 时间线含下行", view.Timeline.Any(i => i.Direction == "↓" && i.Text.Contains("SnapShot")) ? "yes" : "no", "yes");
+            CheckText("MT 时间线过滤 BLE 误报", view.Timeline.Any(i => i.Text.Contains("BLE RI raw")) ? "yes" : "no", "no");
+            CheckText("MT 上报载荷脱敏",
+                report.MaskedPayload.Contains("F19BB0") || report.MaskedPayload.Contains("8933012537780176419") ? "yes" : "no", "no");
             CheckText("MT 本机 TX", view.TxCount.ToString(), "1");
             CheckText("MT 本机 TX 事件", view.Events.Any(e => e.Kind == MainTraceEventKind.Local && e.Text.Contains("MANUAL")) ? "yes" : "no", "yes");
             CheckText("MT 拍照事件", view.Events.Any(e => e.Kind == MainTraceEventKind.Camera && e.Text.Contains("STOP")) ? "yes" : "no", "yes");
@@ -1565,11 +1577,11 @@ internal static class SelfTest
                     {
                         if (item is not ToolStripMenuItem menu) continue;
                         if (menu.Text == "GNSS") gnss = menu;
-                        if (menu.Text == "主日志观察") mainTrace = menu;
+                        if (menu.Text == "Trace监控") mainTrace = menu;
                     }
                 }
                 CheckText("工具菜单有 GNSS", gnss is null ? "no" : "yes", "yes");
-                CheckText("工具菜单有主日志观察", mainTrace is null ? "no" : "yes", "yes");
+                CheckText("工具菜单有 Trace监控", mainTrace is null ? "no" : "yes", "yes");
             }
             form.OpenGnssForTest();
             Application.DoEvents();
@@ -1601,7 +1613,7 @@ internal static class SelfTest
             form.OpenMainTraceForTest();
             Application.DoEvents();
             CheckText("主日志小窗可打开", form.MainTraceOpenForTest ? "yes" : "no", "yes");
-            CheckText("主日志窗口标题", form.MainTraceTitleForTest, "VS2310 观察");
+            CheckText("主日志窗口标题", form.MainTraceTitleForTest, "Trace监控");
             CheckText("主日志数据源", form.MainTraceSourceLabelForTest.Contains("Main Trace") ? "yes" : "no", "yes");
             const string uiTraceSnapshot =
                 "#19:07:30 VS2310:[1.13.16,4.0.15,48MHz,WORKING,IDLE] " +
@@ -1617,6 +1629,21 @@ internal static class SelfTest
             Application.DoEvents();
             CheckText("主日志解析喂入", form.MainTraceParserSummaryForTest, "1|WORKING|VS2310");
             CheckText("主日志显示状态", form.MainTraceSummaryForTest.Contains("WORKING/IDLE|VS2310|CLOSE|1/0") ? "yes" : form.MainTraceSummaryForTest, "yes");
+            form.FeedIncomingForTest(Encoding.ASCII.GetBytes(
+                "encode report ok(100):{\"sta\":{\"doorStatus\":0}}\r\n"
+                + "mqtt publish enter ok topic=VS2310/8667/report len=100\r\n"
+                + "mqtt client 0 publish \"t\" \"{}\" ok, msg_id=0, result=0\r\n"
+                + "gps payload pubilsh success\r\n"
+                + "receive new cmd: {\"cmd\":\"SnapShot\"}\r\n"
+                + uiTraceSnapshot + "\r\n"));
+            form.RefreshMainTraceForTest();
+            Application.DoEvents();
+            CheckText("Trace 上行报文计数", form.MainTraceMessageStateForTest.StartsWith("Up|20|1|1|", StringComparison.Ordinal) ? "yes" : form.MainTraceMessageStateForTest, "yes");
+            form.MainTraceShowDownForTest();
+            CheckText("Trace 可切下发", form.MainTraceMessageStateForTest.StartsWith("Down|20|1|1|", StringComparison.Ordinal) ? "yes" : form.MainTraceMessageStateForTest, "yes");
+            form.MainTraceCycleLimitForTest();
+            CheckText("Trace 可切显示条数", form.MainTraceMessageStateForTest.StartsWith("Down|30|1|1|", StringComparison.Ordinal) ? "yes" : form.MainTraceMessageStateForTest, "yes");
+            form.MainTraceShowUpForTest();
             form.ToggleMainTracePauseForTest();
             CheckText("主日志可暂停", form.MainTracePausedForTest ? "yes" : "no", "yes");
             form.ToggleMainTracePauseForTest();

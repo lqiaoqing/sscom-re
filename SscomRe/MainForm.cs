@@ -352,7 +352,7 @@ public sealed partial class MainForm : Form
         get
         {
             Version? version = typeof(MainForm).Assembly.GetName().Version;
-            return version is null ? "1.5.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+            return version is null ? "1.6.0" : $"{version.Major}.{version.Minor}.{version.Build}";
         }
     }
 
@@ -566,9 +566,9 @@ public sealed partial class MainForm : Form
         var tools = new ToolStripMenuItem("工具");
         _gnssItem = new ToolStripMenuItem("GNSS", null, (_, _) => ToggleGnssWindow());
         tools.DropDownItems.Add(_gnssItem);
-        _mainTraceItem = new ToolStripMenuItem("主日志观察", null, (_, _) => ToggleMainTraceWindow())
+        _mainTraceItem = new ToolStripMenuItem("Trace监控", null, (_, _) => ToggleMainTraceWindow())
         {
-            ToolTipText = "被动解析 VS2310 Main Trace：软换行重组、快照、上报阶段与事件",
+            ToolTipText = "被动解析主日志：设备快照、上行/下发报文与业务事件",
         };
         tools.DropDownItems.Add(_mainTraceItem);
         var help = new ToolStripMenuItem("帮助");

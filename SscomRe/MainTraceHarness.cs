@@ -27,6 +27,24 @@ internal static class MainTraceHarness
                 Feed(uiParser, "mqtt client 0 publish \"VS2310/866784060478296/report\" \"{}\" ok, msg_id=1, result=0\r\n");
                 Feed(uiParser, "#19:07:31 VS2310:[1.13.16,4.0.15,48MHz,WORKING,IDLE] MOD:[CHN-CT,EUTRAN,POWERSAVE,INQ_IP,1] MQTT:[Idle 16] QHTTP:[Idle 1673] SIG:100 GPS:[ON,2,0.5,22.70459,113.81208,0km/h,N,IDL,2m] f_spd:[0km/h] BAT:[0,4.17V,0mA,100%,9787mAH,27.6C] DOOR:[CLOSE,2] RPD:[1] MCU_BLE:[11313,FORCE] SOC_BLE:[21319,PERIOD] TPMS:[1] THS:[1] SOC:[10078] SOC_ERR:[0] LDR:[792] TH:[N/A,N/A]  MEM:32\r\n");
             }
+            if (args.Contains("--down-demo"))
+            {
+                Feed(uiParser, "receive new cmd: {\"cmd\":\"SnapShot\"}\r\n");
+                Feed(uiParser, "receive new cfg: {\"setting\":{\"report_interval\":300}}\r\n");
+                Feed(uiParser, "receive new upgrade: {\"upgrade\":\"demo\"}\r\n");
+                Feed(uiParser, "#19:07:31 VS2310:[1.13.16,4.0.15,48MHz,WORKING,IDLE] MOD:[CHN-CT,EUTRAN,POWERSAVE,INQ_IP,1] MQTT:[Idle 16] QHTTP:[Idle 1673] SIG:100 GPS:[ON,2,0.5,22.70459,113.81208,0km/h,N,IDL,2m] f_spd:[0km/h] BAT:[0,4.17V,0mA,100%,9787mAH,27.6C] DOOR:[CLOSE,2] RPD:[1] MCU_BLE:[11313,FORCE] SOC_BLE:[21319,PERIOD] TPMS:[1] THS:[1] SOC:[10078] SOC_ERR:[0] LDR:[792] TH:[N/A,N/A]  MEM:32\r\n");
+            }
+            if (args.Contains("--up-demo"))
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    Feed(uiParser, "encode report ok(" + (900 + i) + "):{\"sta\":{\"doorStatus\":0}}\r\n");
+                    Feed(uiParser, "mqtt publish enter ok topic=VS2310/866784060478296/report len=" + (900 + i) + "\r\n");
+                    Feed(uiParser, "mqtt client 0 publish \"t\" \"{}\" ok, msg_id=" + i + ", result=0\r\n");
+                    Feed(uiParser, "gps payload pubilsh success\r\n");
+                }
+                Feed(uiParser, "#19:07:31 VS2310:[1.13.16,4.0.15,48MHz,WORKING,IDLE] MOD:[CHN-CT,EUTRAN,POWERSAVE,INQ_IP,1] MQTT:[Idle 16] QHTTP:[Idle 1673] SIG:100 GPS:[ON,2,0.5,22.70459,113.81208,0km/h,N,IDL,2m] f_spd:[0km/h] BAT:[0,4.17V,0mA,100%,9787mAH,27.6C] DOOR:[CLOSE,2] RPD:[1] MCU_BLE:[11313,FORCE] SOC_BLE:[21319,PERIOD] TPMS:[1] THS:[1] SOC:[10078] SOC_ERR:[0] LDR:[792] TH:[N/A,N/A]  MEM:32\r\n");
+            }
             if (args.Contains("--light")) Theme.SetLight(true);
             Application.EnableVisualStyles();
             using var window = new MainTraceWindow(() => uiParser.Snapshot(),
@@ -36,6 +54,7 @@ internal static class MainTraceHarness
             window.Show();
             Application.DoEvents();
             window.RefreshForTest();
+            if (args.Contains("--down")) window.ShowDownForTest();
             Application.DoEvents();
             using Bitmap bitmap = window.RenderForTest();
             bitmap.Save(args[ui + 2], System.Drawing.Imaging.ImageFormat.Png);
