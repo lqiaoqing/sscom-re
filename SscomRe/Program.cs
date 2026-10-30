@@ -27,6 +27,11 @@ static class Program
             Environment.Exit(LogBenchmark.Run(args));
             return;
         }
+        if (args.Contains("--mt-parse") || args.Contains("--mt-ui"))
+        {
+            Environment.Exit(MainTraceHarness.Run(args));
+            return;
+        }
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         // 未处理异常：写日志（exe 同目录 crash.log）后再照常弹默认款对话框

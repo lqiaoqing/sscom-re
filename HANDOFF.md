@@ -1,8 +1,8 @@
 # 交接文档：sscomRe（串口/网络数据调试器 定制版）
 
 > 行为规格的唯一依据是 [`sscom5.13.1-rewrite-spec.md`](sscom5.13.1-rewrite-spec.md)；本文件只做工程索引、架构约定和已知取舍。
-> 当前版本 **v1.4.0**（2026-10-28），版本记录见 [CHANGELOG.md](CHANGELOG.md)。
-> 当前状态（2026-10-28）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏 + 日志头伸缩开关、Phase 3B 设置浮层、Phase 3C RTF 日志性能/即时面板/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、日志自动跟随、发送设置重排、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动始终跟随、日志头端口快捷下拉、多条面板方案 02、日志高亮规则（9 条预置，错误/警告默认开启，可预览）与 Ctrl+K 命令面板（工具栏按钮入口）、带颜色日志导出、持续 HTML 记录、GNSS 增强面板、暂停显示与按目录保存已落地；`--selftest` 411/411 通过**。原程序、镜像和反编译源码未纳入版本库。
+> 当前版本 **v1.5.0**（2026-10-30），版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态（2026-10-29）：**M1–M9 全部实现；UI Phase 1 深/浅主题、Phase 2 三栏工作区、Phase 3A 左栏完全隐藏 + 日志头伸缩开关、Phase 3B 设置浮层、Phase 3C RTF 日志性能/即时面板/toast 已接入；连接栏方案 A（自绘端口字段/浮层、状态卡、RTS/DTR 胶囊、左栏拖宽）、连续换口重开、日志自动跟随、发送设置重排、125% DPI 对话框排版、多条字符串动态页数、定制版命名/图标、自动滚动始终跟随、日志头端口快捷下拉、多条面板方案 02、日志高亮规则（9 条预置，错误/警告默认开启，可预览）与 Ctrl+K 命令面板（工具栏按钮入口）、带颜色日志导出、持续 HTML 记录、GNSS 增强面板、暂停显示与按目录保存、VS2310 主日志观察面板已落地；`--selftest` 454/454 通过**。原程序、镜像和反编译源码未纳入版本库。
 
 ---
 
@@ -71,8 +71,12 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
   NmeaParser.cs         NMEA 0183 拼句、定位/GSV 卫星快照（纯逻辑）
   GnssWindow.cs         GNSS 增强面板（坐标/精度/前6卫星）
   MainForm.Gnss.cs      GNSS 菜单、解析开关与小窗生命周期
+  MainTraceParser.cs    VS2310 软换行重组、快照/事件/上报阶段、证据视图（纯逻辑）
+  MainTraceWindow.cs    VS2310 主日志观察面板（自绘、筛选/滚动/暂停）
+  MainForm.MainTrace.cs 主日志菜单、数据入口门控、窗口生命周期
+  MainTraceHarness.cs   --mt-parse / --mt-ui 离线回放与截图
   CommandPalette.cs     Ctrl+K 已保存命令面板
-  SelfTest.cs           --selftest 用例（当前 411 项）
+  SelfTest.cs           --selftest 用例（当前 454 项）
 ```
 
 ---
@@ -99,7 +103,7 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 **验证口径：**
 
 - `dotnet build -c Release` → 0 警告 0 错误
-- `sscomRe_v1.4.0.exe --selftest` → `pass=411 fail=0`
+- `sscomRe_v1.5.0.exe --selftest` → `pass=454 fail=0`
 - 启动冒烟 ≥5 秒无 `crash.log`
 - 本次环境有 COM38/COM39，只做了接收、换口和侧栏伸缩冒烟；DTR/RTS、发送文件、定时发送与真实网口仍需在目标硬件复验
 
@@ -110,23 +114,23 @@ SscomRe/                     工程（.NET Framework 4.8 WinForms）
 ```bash
 cd SscomRe
 dotnet build -c Release
-# 输出固定为 SscomRe/bin/net48/sscomRe_v1.4.0.exe（csproj 固定 OutputPath + AssemblyName）
+# 输出固定为 SscomRe/bin/net48/sscomRe_v1.5.0.exe（csproj 固定 OutputPath + AssemblyName）
 
 cd bin/net48
-./sscomRe_v1.4.0.exe --selftest          # 必须 pass=411 fail=0
-./sscomRe_v1.4.0.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
+./sscomRe_v1.5.0.exe --selftest          # 必须 pass=454 fail=0
+./sscomRe_v1.5.0.exe --bench-log 2 30    # 可选：日志吞吐压测，见 §5.5
 
 # 冒烟：跑 ≥5 秒，检查没崩
 rm -f crash.log
-(./sscomRe_v1.4.0.exe &) && sleep 5
+(./sscomRe_v1.5.0.exe &) && sleep 5
 ls crash.log && echo "崩了，看日志" || echo "正常"
-taskkill //IM sscomRe_v1.4.0.exe //F
+taskkill //IM sscomRe_v1.5.0.exe //F
 ```
 
 **约定：**
 
 - `sscom51.ini` 按**当前工作目录**读写；自检和冒烟务必在 `bin/net48` 下启动。自检会自动备份/恢复现有 ini，避免测试字体、模式、窗口几何污染用户配置。
-- 不要杀用户正在用的窗口；编译报 `MSB3027/文件被锁定` 说明 `bin/net48/sscomRe_v1.4.0.exe` 正在运行，先关闭再编译，不要用 `-o` 另开目录。
+- 不要杀用户正在用的窗口；编译报 `MSB3027/文件被锁定` 说明 `bin/net48/sscomRe_v1.5.0.exe` 正在运行，先关闭再编译，不要用 `-o` 另开目录。
 - 任何未处理异常都会写 exe 同目录的 `crash.log`，先看它。
 - 新增逻辑尽量抽成**纯类**（如 `Checksums`、`TerminalInput`、`MultiSendPlanner`）并在 `--selftest` 加用例；网络类可写本机回环测试。
 - 每次改动跑：build → selftest → 5 秒冒烟，三步都过再汇报。
@@ -216,6 +220,7 @@ taskkill //IM sscomRe_v1.4.0.exe //F
 - 持续 HTML 记录在 `HtmlLogRecorder`：`AppendRecv` 负责接收与显示回显（普通 `Append` 永远跳过 TX 行），发送数据在 `WriteChannel` 成功后调用 `AppendTx` 单独写入，因此不依赖“加时间戳”是否开启显示回显。每行只给与默认色不同的片段写 `<span>`；按字节阈值在行边界分卷，每卷写完整头/尾，异常退出时浏览器也能自动闭合。规则/调色板/HEX 模式在开始记录时快照，修改后需取消并重新勾选。记录状态与失败检测在 `StatusTick` 的 `UpdateHtmlCaptureStatus` 中，误删这条会看不到写入错误。
 - 暂停显示：`_displayPaused` 只停住 `_recvBox` 的增量刷新，接收/解析继续，新文本进入 `_displayHold`（截断时 `_displayHoldBase` 保存整屏）；恢复时补画，`LogicalWindowText()` 让保存数据包含暂停期间的内容。暂停显示/清除窗口/保存数据与自动滚动在同一行；不要改回“暂停=停止滚动”，也不要在暂停时停止接收。
 - GNSS：`NmeaParser` 支持 GGA/RMC/GLL/GNS/VTG/GSA/GSV/ZDA；GSV 以（星座, PRN）合并，6 秒无更新过期，`SatellitesInView` 按 SNR 降序；GSA 提供 PDOP/HDOP/VDOP，GGA 提供水准面差距/差分龄期/基准站。`GnssWindow` 客户区 420×620、自定义绘制；卫星只显示前 6 颗，信号条颜色按 SNR 强度（≥40 / 25–39 / <25），星座徽标为 G/C/E/R；坐标卡同时显示十进制度与 DMS。**参与数来自 GGA/GNS，可见数只统计 GSV**：设备未输出全部星座 GSV（常见 QZSS/北斗）时参与数会大于 GSV 可见数，面板显示“GSV 未覆盖全部”，不要用可见数去 clamp 参与数。GPGSV 里 PRN 193–202 / 120–158 会按 QZSS / SBAS 归类。
+- VS2310 主日志：`MainTraceParser` 先按逻辑消息前缀切分，再**直接拼接**片段；不要按 CRLF 分行或给片段补空格——设备约每 200 字节插入的软换行会断在字段名/JSON key 中间。接收时间只到串口块级别，面板用“同批”表达，不伪造毫秒。上报按“编码 → 提交 → API → 业务成功日志 → 云端”分开，未观测不推断失败；本机发送走 `NoteTx`，不能计入设备下发。`HandleIncoming` 只在面板首次打开后 feed（`_mainTraceEnabled`），连接变化 `Reset()`；面板 600×780，125% 客户区 750×975。真实 COM38 回放：333/333 快照、588 条逻辑消息、124 条事件、8/8 业务成功、SOC_ERR=2 ×12、本机 TX 2。
 - 按目录保存：`SaveData()` 先 `SaveDataDialog.Choose`（默认上次目录，之后才是 CWD），再写 `SaveWindows<时间戳>.TXT`（GBK，含暂停 hold 内容）和 `SAVE<时间戳>.DAT`（原始字节）；目录不可写用 MessageBox，成功提示保留模态。目录只在本次运行记忆，未写 ini。
 - Ctrl+K 命令面板只读已保存命令：可见页读控件，未建页读 `_multiRowSource`；`CommandPaletteDismissFilter` 负责点击外部关闭，`Ctrl+K`/Esc 在 `ProcessCmdKey` 中切换。顶部工具栏「命令面板」按钮是唯一鼠标入口（`BuildToolBar`），面板不包含清空/删除类操作。
 - composer 设置行高度按 `RowHeightOf` 额外 +4px（`UpdateComposerGridRows`），给自绘下拉框/按钮留 Margin。

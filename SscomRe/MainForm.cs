@@ -352,7 +352,7 @@ public sealed partial class MainForm : Form
         get
         {
             Version? version = typeof(MainForm).Assembly.GetName().Version;
-            return version is null ? "1.4.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+            return version is null ? "1.5.0" : $"{version.Major}.{version.Minor}.{version.Build}";
         }
     }
 
@@ -566,6 +566,11 @@ public sealed partial class MainForm : Form
         var tools = new ToolStripMenuItem("工具");
         _gnssItem = new ToolStripMenuItem("GNSS", null, (_, _) => ToggleGnssWindow());
         tools.DropDownItems.Add(_gnssItem);
+        _mainTraceItem = new ToolStripMenuItem("主日志观察", null, (_, _) => ToggleMainTraceWindow())
+        {
+            ToolTipText = "被动解析 VS2310 Main Trace：软换行重组、快照、上报阶段与事件",
+        };
+        tools.DropDownItems.Add(_mainTraceItem);
         var help = new ToolStripMenuItem("帮助");
         help.DropDownItems.Add(new ToolStripMenuItem("关于", null, (_, _) =>
             MessageBox.Show(this,
@@ -1870,6 +1875,7 @@ public sealed partial class MainForm : Form
         string segment = _receive.Process(data, _snapHexDisplay, _snapTimestamp,
             _snapTimeoutMs, out string? memoReplace);
         if (_snapGnss) _nmea.Push(data);
+        if (_mainTraceEnabled) _mainTrace.Push(data);
         EnqueueDisplay(segment, memoReplace);
     }
 
@@ -2261,6 +2267,7 @@ public sealed partial class MainForm : Form
         {
             _port.Close();
             _portOpenIntent = false;
+            _mainTrace.Reset();
         }
         else
         {
@@ -2273,6 +2280,7 @@ public sealed partial class MainForm : Form
     {
         // 打开失败也保留“想保持打开”的意图，下一次换口/选择端口继续尝试。
         _portOpenIntent = true;
+        _mainTrace.Reset();
         try
         {
             _port.BaudIndex = _baudCombo.SelectedIndex;
@@ -2338,6 +2346,7 @@ public sealed partial class MainForm : Form
             // 关闭串口、禁用“发送文件”和“发送”、弹错误框、最后取消勾选自己
             _abortFlag = true;
             _port.Close();
+            _mainTrace.Reset();
             _sendFileButton.Enabled = false;
             _sendButton.Enabled = false;
             MessageBox.Show(this,
@@ -2838,6 +2847,7 @@ public sealed partial class MainForm : Form
     /// <summary>连接（规格 ConnectClick）：按模式填主机/端口后启动对应套接字。</summary>
     private void ConnectNetwork()
     {
+        _mainTrace.Reset();
         switch (_netMode)
         {
             case NetMode.TcpClient:
@@ -2874,6 +2884,7 @@ public sealed partial class MainForm : Form
     private void DisconnectNetwork()
     {
         _net.Disconnect();                                           // 内含清就绪（0x4ED535 = 0）
+        _mainTrace.Reset();
         _connectButton.Enabled = true;
         _disconnectButton.Enabled = true;
         UpdateStatus();
@@ -2898,6 +2909,8 @@ public sealed partial class MainForm : Form
         {
             return;
         }
+        // 本机发送单独计数，不能算作设备下发或设备上报
+        if (_mainTraceEnabled) _mainTrace.NoteTx(data);
         // 发送数据直接进入持续记录；显示回显是否开启不影响这里
         if (_htmlRecorder is not null)
         {
@@ -3451,6 +3464,7 @@ public sealed partial class MainForm : Form
         _txRateLabel.ForeColor = Theme.StatusSend;
         _bufferLabel.ForeColor = Theme.Muted;
         _gnssWindow?.RefreshTheme();
+        _mainTraceWindow?.RefreshTheme();
         if (_recvBox.ContextMenuStrip is ContextMenuStrip logMenu) Theme.StyleContextMenu(logMenu);
         if (_saveMenu is not null) Theme.StyleContextMenu(_saveMenu);
         // 配色已经换好，先让窗口重画；日志就是 1M 字符，重画改为按块异步，点击立即有反馈。
@@ -3738,6 +3752,7 @@ public sealed partial class MainForm : Form
         _autoSaveTimer.Stop();
         try { _htmlRecorder?.Dispose(); } catch { /* 关闭时写 footer 失败不影响退出 */ }
         _htmlRecorder = null;
+        try { _mainTraceWindow?.Close(); } catch { /* 面板计时器停止失败不阻塞退出 */ }
         CloseRecvFile();                       // 先把接收文件 flush/关闭再存参数
         SaveConfig();
         try { _net.Disconnect(); } catch { /* 关闭时断开失败不影响退出 */ }

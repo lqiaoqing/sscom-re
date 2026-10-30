@@ -899,6 +899,107 @@ internal static class SelfTest
             CheckText("NMEA 无效年龄后缀", fix.FormatAge(fix.SentenceTick).EndsWith("前") ? "yes" : "no", "yes");
         }
 
+        // —— VS2310 Main Trace：软换行、快照、上报阶段与证据边界 ——
+        {
+            const string snap1 =
+                "#19:07:30 VS2310:[1.13.16,4.0.15,48MHz,WORKING,IDLE] " +
+                "MOD:[CHN-CT,EUTRAN,POWERSAVE,INQ_IP,1] MQTT:[Idle 16] QHTTP:[Idle 1673] " +
+                "SIG:100 GPS:[ON,2,0.5,22.70459,113.81208,0km/h,N,IDL,2m] f_spd:[0km/h] " +
+                "BAT:[0,4.17V,0mA,100%,9787mAH,27.6C] DOOR:[CLO\r\nSE,2] RPD:[1] " +
+                "MCU_BLE:[11313,FORCE] SOC_BLE:[21319,PERIOD] TPMS:[1] THS:[1] SOC:[10078] " +
+                "SOC_ERR:[0] LDR:[792] TH:[N/\r\nA,N/A]  MEM:32";
+            const string snap2 =
+                "#19:07:31 VS2310:[1.13.16,4.0.15,48MHz,WORKING,IDLE] " +
+                "MOD:[CHN-CT,EUTRAN,ACTIVATED,INQ_IP,2] MQTT:[Conn. 1] QHTTP:[Idle 1674] " +
+                "SIG:100 GPS:[ON,2,0.5,22.70459,113.81208,0km/h,N,IDL,2m] f_spd:[0km/h] " +
+                "BAT:[0,4.17V,0mA,100%,9787mAH,27.6C] DOOR:[INVALID,1] RPD:[1] " +
+                "MCU_BLE:[11313,FORCE] SOC_BLE:[21319,PERIOD] TPMS:[1] THS:[1] SOC:[10078] " +
+                "SOC_ERR:[2] LDR:[792] TH:[N/A,N/A]  MEM:32";
+            const string json =
+                "{\"id\":\"866784060478296\",\"ver\":\"2.00\",\"t\":1793239630,\"updateIndex\":393," +
+                "\"info\":{\"ver\":\"1.13.16\",\"bl_ver\":\"4.0.15\",\"pwd\":\"F19BB0\",\"iccid\":\"8933012537780176419\"}," +
+                "\"sta\":{\"bat\":4.16,\"soc\":100,\"cur\":0,\"batTemp\":276,\"capacity\":9788,\"errCode\":0," +
+                "\"doorStatus\":0,\"rpd\":1,\"event\":80,\"ldr\":786},\"stats\":{\"mileage\":0}," +
+                "\"gps\":{\"lat\":22.7046,\"lng\":113.812083,\"spd\":0.037,\"f_spd\":0.024,\"alt\":0,\"hdg\":85.28,\"hdop\":0.54,\"state\":2}," +
+                "\"nwinfo\":{\"opr\":\"CHN-CT\",\"act\":\"EUTRAN\",\"lac\":30593,\"cid\":125339411,\"mcc\":460,\"mnc\":11,\"band\":\"LTE BAND 5\",\"sig\":100}," +
+                "\"SoC\":{\"SoC_ver\":\"10078\",\"SoC_status\":1,\"SoC_errCode\":0}," +
+                "\"sensor\":{\"bleTpms\":[[\"33-33-33-33-33-90\",4,0,0,4,0]],\"thSensor\":[[\"7C-D9-F4-13-F6-C9\",1,1,278,67]]," +
+                "\"bleDoor\":[[\"ED-E2-F4-0A-99-9E\",5,1,0],[\"CC-FC-86-CB-0C-6B\",5,2,0]]}}";
+
+            static void FeedMt(MainTraceParser parser, string text, int chunk = 11)
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(text);
+                for (int offset = 0; offset < bytes.Length; offset += chunk)
+                {
+                    int length = Math.Min(chunk, bytes.Length - offset);
+                    var part = new byte[length];
+                    Buffer.BlockCopy(bytes, offset, part, 0, length);
+                    parser.Push(part);
+                }
+            }
+
+            var mt = new MainTraceParser();
+            FeedMt(mt, snap1 + "\r\n" + snap2 + "\r\n");
+            FeedMt(mt, "encode report ok(925):" + json + "\r\n");
+            FeedMt(mt, "mqtt publish enter ok topic=VS2310/866784060478296/report len=925\r\n");
+            FeedMt(mt, "mqtt client 0 publish \"VS2310/866784060478296/report\" \"{}\" ok, msg_id=0, result=0\r\n");
+            FeedMt(mt, "gps payload pubilsh success\r\n");
+            FeedMt(mt, "receive new cmd: {\"cmd\":\"SnapShot\"}\r\n");
+            FeedMt(mt, "Mainstate WORKING Entered Event:1\r\n");
+            FeedMt(mt, "BLE src=door_close\r\n");
+            FeedMt(mt, "loading snapshot STOP queued, op=0x05\r\n");
+            mt.NoteTx(Encoding.ASCII.GetBytes("{\"cmd\":\"MANUAL\",\"door_mac\":[[\"ED:E2:F4:0A:99:9E\",5]]}"));
+            FeedMt(mt, snap1 + "\r\n");
+
+            MainTraceView view = mt.Snapshot();
+            CheckText("MT 软换行快照数", view.SnapshotCount.ToString(), "3");
+            CheckText("MT 快照解析失败数", view.MalformedSnapshots.ToString(), "0");
+            CheckText("MT 模型/固件", view.Snapshot.Model + "/" + view.Snapshot.Firmware, "VS2310/1.13.16");
+            CheckText("MT 软换行字段", view.Snapshot.DoorState + "/" + view.Snapshot.BoardTemperature + "/" + view.Snapshot.Memory,
+                "CLOSE/N/A/32");
+            CheckText("MT 设备 RTC", view.Snapshot.DeviceTime, "19:07:30");
+            CheckText("MT RTC 差有值", view.Snapshot.ClockOffsetText.Length > 0 ? "yes" : "no", "yes");
+            CheckText("MT MQTT 秒数", view.Snapshot.MqttSummary, "Idle 16s");
+            CheckText("MT 电池", view.Snapshot.BatteryVoltage + "/" + view.Snapshot.BatteryCapacity,
+                "4.17 V/9787 mAh");
+            CheckText("MT SOC_ERR 统计", view.SocErrorSummary, "SOC_ERR=2 ×1");
+            CheckText("MT DOOR INVALID 统计", view.DoorInvalidSnapshots.ToString(), "1");
+            CheckText("MT 快照变化事件", view.Events.Any(e => e.Text.Contains("模组 POWERSAVE → ACTIVATED")) ? "yes" : "no", "yes");
+            CheckText("MT 门磁变化事件", view.Events.Any(e => e.Text.Contains("门磁 CLOSE → INVALID")) ? "yes" : "no", "yes");
+            CheckText("MT 上报数", view.ReportCount.ToString(), "1");
+            CheckText("MT 上报成功", view.ReportSuccessCount + "/" + view.ReportUnobservedCount, "1/0");
+            MainTraceReport report = view.LastReport!;
+            CheckText("MT 上报字节/JSON", report.Bytes + "/" + report.JsonComplete, "925/True");
+            CheckText("MT 上报结果", report.Outcome.ToString(), "Success");
+            CheckText("MT 上报网络", report.Band + "/" + report.Lac + "/" + report.Cid, "LTE BAND 5/30593/125339411");
+            CheckText("MT 上报传感器", report.ThsText + "/" + report.DoorCount, "27.8 °C / 67%/2");
+            CheckText("MT 上报脱敏", report.MaskedIccid, "8933…6419");
+            CheckText("MT 上报原文 pwd 脱敏",
+                view.Events.Any(e => e.Raw.Contains("\"pwd\":\"••••••\"") && !e.Raw.Contains("F19BB0")) ? "yes" : "no", "yes");
+            CheckText("MT 上报原文 ICCID 脱敏",
+                view.Events.Any(e => e.Raw.Contains("8933…6419")) ? "yes" : "no", "yes");
+            CheckText("MT 下发计数", view.DownlinkCount.ToString(), "1");
+            CheckText("MT 本机 TX", view.TxCount.ToString(), "1");
+            CheckText("MT 本机 TX 事件", view.Events.Any(e => e.Kind == MainTraceEventKind.Local && e.Text.Contains("MANUAL")) ? "yes" : "no", "yes");
+            CheckText("MT 拍照事件", view.Events.Any(e => e.Kind == MainTraceEventKind.Camera && e.Text.Contains("STOP")) ? "yes" : "no", "yes");
+            CheckText("MT 云端边界", view.LinkStages.Last().State.ToString(), "Unobserved");
+            CheckText("MT 发布链路", view.LinkStages[4].State.ToString(), "Observed");
+
+            FeedMt(mt, "encode report ok(900):{\"sta\":{\"doorStatus\":1}}\r\n");
+            FeedMt(mt, "mqtt publish enter ok topic=VS2310/866784060478296/report len=900\r\n");
+            FeedMt(mt, "mqtt client 0 publish \"VS2310/866784060478296/report\" \"{}\" ok, msg_id=1, result=0\r\n");
+            FeedMt(mt, snap1 + "\r\n");
+            view = mt.Snapshot();
+            CheckText("MT 第二次上报结果未观测", view.LastReport!.Outcome.ToString(), "ApiReturned");
+            CheckText("MT 结果未观测计数", view.ReportUnobservedCount.ToString(), "1");
+            CheckText("MT 未观测告警", view.Alerts.Any(a => a.Contains("业务成功日志未观测")) ? "yes" : "no", "yes");
+            CheckText("MT 发布链路告警", view.LinkStages[4].State.ToString(), "Warning");
+
+            int before = mt.Snapshot().SnapshotCount;
+            mt.Push(new byte[] { 0x00, 0x01, 0x02, 0x03 });
+            CheckText("MT 二进制不产生快照", mt.Snapshot().SnapshotCount.ToString(), before.ToString());
+        }
+
         // —— 主窗体：接收区占大头，选项保持一行，发送框是矮条 ——
         {
             string ini = Path.Combine(AppContext.BaseDirectory, "sscom51.ini");
@@ -1457,12 +1558,18 @@ internal static class SelfTest
                 int helpAt = names.IndexOf("帮助");
                 CheckText("工具菜单在帮助左边", toolsAt >= 0 && helpAt > toolsAt ? "yes" : string.Join(",", names), "yes");
                 ToolStripMenuItem? gnss = null;
+                ToolStripMenuItem? mainTrace = null;
                 if (toolsAt >= 0 && form.MainMenuStrip.Items[toolsAt] is ToolStripMenuItem tools)
                 {
                     foreach (ToolStripItem item in tools.DropDownItems)
-                        if (item is ToolStripMenuItem menu && menu.Text == "GNSS") gnss = menu;
+                    {
+                        if (item is not ToolStripMenuItem menu) continue;
+                        if (menu.Text == "GNSS") gnss = menu;
+                        if (menu.Text == "主日志观察") mainTrace = menu;
+                    }
                 }
                 CheckText("工具菜单有 GNSS", gnss is null ? "no" : "yes", "yes");
+                CheckText("工具菜单有主日志观察", mainTrace is null ? "no" : "yes", "yes");
             }
             form.OpenGnssForTest();
             Application.DoEvents();
@@ -1490,6 +1597,42 @@ internal static class SelfTest
             form.CloseGnssForTest();
             Application.DoEvents();
             CheckText("关闭 GNSS 停止解析", form.GnssParsingForTest ? "yes" : "no", "no");
+
+            form.OpenMainTraceForTest();
+            Application.DoEvents();
+            CheckText("主日志小窗可打开", form.MainTraceOpenForTest ? "yes" : "no", "yes");
+            CheckText("主日志窗口标题", form.MainTraceTitleForTest, "VS2310 观察");
+            CheckText("主日志数据源", form.MainTraceSourceLabelForTest.Contains("Main Trace") ? "yes" : "no", "yes");
+            const string uiTraceSnapshot =
+                "#19:07:30 VS2310:[1.13.16,4.0.15,48MHz,WORKING,IDLE] " +
+                "MOD:[CHN-CT,EUTRAN,POWERSAVE,INQ_IP,1] MQTT:[Idle 16] QHTTP:[Idle 1673] " +
+                "SIG:100 GPS:[ON,2,0.5,22.70459,113.81208,0km/h,N,IDL,2m] f_spd:[0km/h] " +
+                "BAT:[0,4.17V,0mA,100%,9787mAH,27.6C] DOOR:[CLOSE,2] RPD:[1] " +
+                "MCU_BLE:[11313,FORCE] SOC_BLE:[21319,PERIOD] TPMS:[1] THS:[1] SOC:[10078] " +
+                "SOC_ERR:[0] LDR:[792] TH:[N/A,N/A]  MEM:32";
+            form.ResetMainTraceForTest();
+            form.FeedIncomingForTest(Encoding.ASCII.GetBytes(uiTraceSnapshot + "\r\n"));
+            form.RefreshMainTraceForTest();
+            CheckText("主日志解析喂入(接收管线)", form.MainTraceParserSummaryForTest, "1|WORKING|VS2310");
+            Application.DoEvents();
+            CheckText("主日志解析喂入", form.MainTraceParserSummaryForTest, "1|WORKING|VS2310");
+            CheckText("主日志显示状态", form.MainTraceSummaryForTest.Contains("WORKING/IDLE|VS2310|CLOSE|1/0") ? "yes" : form.MainTraceSummaryForTest, "yes");
+            form.ToggleMainTracePauseForTest();
+            CheckText("主日志可暂停", form.MainTracePausedForTest ? "yes" : "no", "yes");
+            form.ToggleMainTracePauseForTest();
+            CheckText("主日志可恢复", form.MainTracePausedForTest ? "yes" : "no", "no");
+            using (Bitmap? traceBitmap = form.RenderMainTraceForTest())
+            {
+                CheckText("主日志面板可绘制", traceBitmap is { Width: > 0, Height: > 0 } ? "yes" : "no", "yes");
+                string? capture = Environment.GetEnvironmentVariable("SSCOM_MT_CAPTURE");
+                if (capture is { Length: > 0 } && traceBitmap is not null)
+                {
+                    try { traceBitmap.Save(capture, System.Drawing.Imaging.ImageFormat.Png); } catch { /* 截图失败不影响自检 */ }
+                }
+            }
+            form.CloseMainTraceForTest();
+            Application.DoEvents();
+            CheckText("主日志可关闭", form.MainTraceOpenForTest ? "yes" : "no", "no");
             foreach (var c in AllControls(form))
                 if (c is Button { Text: "隐藏" } hideMulti) hideMulti.PerformClick();
             int layoutScale = Math.Max(96, form.DeviceDpi);
