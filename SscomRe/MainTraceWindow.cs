@@ -67,23 +67,23 @@ internal sealed class MainTraceWindow : Form
         StartPosition = FormStartPosition.Manual;
         AutoScaleMode = AutoScaleMode.None;
         Font = new Font("Microsoft YaHei UI", 9F);
-        _titleFont = new Font(Font.FontFamily, 11.5F, FontStyle.Bold);
-        _subFont = new Font(Font.FontFamily, 7.5F);
-        _heroFont = new Font(Font.FontFamily, 14F, FontStyle.Bold);
-        _heroSubFont = new Font(Font.FontFamily, 7F, FontStyle.Bold);
-        _cardTitleFont = new Font(Font.FontFamily, 7.2F, FontStyle.Bold);
-        _bigFont = new Font(Font.FontFamily, 8.8F, FontStyle.Bold);
-        _monoBigFont = Theme.MonoFont(7.2F);
-        _kvLabelFont = new Font(Font.FontFamily, 5.6F);
-        _kvValueFont = Theme.MonoFont(6.6F);
-        _tinyFont = new Font(Font.FontFamily, 5.4F);
-        _eventFont = new Font(Font.FontFamily, 6F);
-        _eventTimeFont = Theme.MonoFont(5.2F);
-        _detailFont = Theme.MonoFont(5.2F);
-        _chipFont = new Font(Font.FontFamily, 5.4F);
+        _titleFont = new Font(Font.FontFamily, 12F, FontStyle.Bold);
+        _subFont = new Font(Font.FontFamily, 8.5F);
+        _heroFont = new Font(Font.FontFamily, 17F, FontStyle.Bold);
+        _heroSubFont = new Font(Font.FontFamily, 8.5F, FontStyle.Bold);
+        _cardTitleFont = new Font(Font.FontFamily, 8.8F, FontStyle.Bold);
+        _bigFont = new Font(Font.FontFamily, 10.5F, FontStyle.Bold);
+        _monoBigFont = Theme.MonoFont(9F);
+        _kvLabelFont = new Font(Font.FontFamily, 7F);
+        _kvValueFont = Theme.MonoFont(8.8F);
+        _tinyFont = new Font(Font.FontFamily, 6.8F);
+        _eventFont = new Font(Font.FontFamily, 7.8F);
+        _eventTimeFont = Theme.MonoFont(6.6F);
+        _detailFont = Theme.MonoFont(7.2F);
+        _chipFont = new Font(Font.FontFamily, 7F);
         Theme.ApplyWindow(this);
         BackColor = Theme.Surface;
-        ClientSize = new Size(Theme.Scale(this, 760), Theme.Scale(this, 800));
+        ClientSize = new Size(Theme.Scale(this, 900), Theme.Scale(this, 800));
         var body = new Body(this) { Dock = DockStyle.Fill };
         Controls.Add(body);
         _timer.Tick += (_, _) => Tick();
@@ -139,7 +139,7 @@ internal sealed class MainTraceWindow : Form
         base.OnShown(e);
         Size extra = Size - ClientSize;
         MinimumSize = new Size(
-            Theme.Scale(this, 760) + extra.Width,
+            Theme.Scale(this, 900) + extra.Width,
             Theme.Scale(this, 800) + extra.Height);
         _view = _snapshot();
         Tick();
@@ -398,28 +398,22 @@ internal sealed class MainTraceWindow : Form
             Graphics g = e.Graphics;
             g.Clear(Theme.Surface);
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            int topH = S(38);
+            int topH = S(42);
             int pad = S(14);
             int gap = S(5);
             int width = Math.Max(S(500), Width - pad * 2);
             int y = topH + S(10);
             DrawTopBar(g, 0, 0, Width, topH, pad);
-            y = DrawSection(g, "设备信息", "版本以实际可观察数据为准", pad, y, width);
             y = DrawDeviceInfo(g, pad, y, width) + gap;
-            int heroH = S(62);
+            int heroH = S(78);
             DrawHero(g, new Rectangle(pad, y, width, heroH));
             y += heroH + gap;
-            y = DrawSection(g, "当前快照", "最近可观察到的设备数据", pad, y, width);
-            y = DrawSnapshots(g, pad, y, width, S(144)) + gap;
-            y = DrawSection(g, "传感器观察", "无传感器报文时不推断在线或正常", pad, y, width);
-            y = DrawSensor(g, pad, y, width, S(80)) + gap;
-            int bottomHeading = S(15);
-            int bottomCardH = S(300);
-            int bottomH = bottomHeading + S(3) + bottomCardH;
-            DrawBottom(g, pad, y, width, bottomHeading, bottomCardH);
-            y += bottomH + gap;
-            DrawFooter(g, pad, y, width);
-        }
+            y = DrawSnapshots(g, pad, y, width, S(208)) + gap;
+            y = DrawPeripheral(g, pad, y, width, S(28)) + gap;
+            int bottomCardH = S(326);
+            DrawBottom(g, pad, y, width, bottomCardH);
+            y += bottomCardH + gap;
+            DrawFooter(g, pad, y, width);        }
 
         private void DrawFooter(Graphics g, int pad, int y, int width)
         {
@@ -432,11 +426,11 @@ internal sealed class MainTraceWindow : Form
             int rightW = Measure(right, _owner._detailFont).Width;
             int midW = Measure(mid, _owner._detailFont).Width;
             int leftW = Math.Max(S(80), width - rightW - midW - S(24));
-            DrawText(g, left, _owner._detailFont, new Rectangle(pad, y, leftW, S(12)), Theme.Dim,
+            DrawText(g, left, _owner._detailFont, new Rectangle(pad, y, leftW, S(14)), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
-            DrawText(g, mid, _owner._detailFont, new Rectangle(pad + leftW + S(8), y, midW, S(12)), Theme.Dim,
+            DrawText(g, mid, _owner._detailFont, new Rectangle(pad + leftW + S(8), y, midW, S(14)), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine);
-            DrawText(g, right, _owner._detailFont, new Rectangle(Width - pad - rightW, y, rightW, S(12)),
+            DrawText(g, right, _owner._detailFont, new Rectangle(Width - pad - rightW, y, rightW, S(14)),
                 Theme.Dim, TextFormatFlags.Right | TextFormatFlags.SingleLine);
         }
 
@@ -506,23 +500,9 @@ internal sealed class MainTraceWindow : Form
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
         }
 
-        private int DrawSection(Graphics g, string title, string note, int pad, int y, int width)
-        {
-            var bar = new Rectangle(pad + S(1), y + S(2), S(3), S(11));
-            using (var brush = new SolidBrush(Theme.Accent))
-                g.FillRectangle(brush, bar);
-            DrawText(g, title, _owner._cardTitleFont,
-                new Rectangle(pad + S(8), y, width - S(120), S(15)), Theme.Text,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-            DrawText(g, note, _owner._tinyFont,
-                new Rectangle(pad + width - S(260), y, S(260), S(15)), Theme.Dim,
-                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-            return y + S(15) + S(3);
-        }
-
         private int DrawDeviceInfo(Graphics g, int x, int y, int width)
         {
-            int h = S(42);
+            int h = S(50);
             DrawCard(g, new Rectangle(x, y, width, h), Theme.Raised, Theme.BorderSoft);
             string[] labels = { "设备型号", "MCU 固件", "Bootloader", "SoC 固件", "MCU BLE", "SoC BLE", "Linux 内核" };
             MainTraceSnapshot s = _owner._view.Snapshot;
@@ -539,10 +519,10 @@ internal sealed class MainTraceWindow : Form
                     using (var pen = new Pen(Theme.BorderSoft, 1))
                         g.DrawLine(pen, cx, y + S(6), cx, y + h - S(6));
                 DrawText(g, labels[i], _owner._tinyFont,
-                    new Rectangle(cx + S(9), y + S(6), cellW - S(12), S(11)), Theme.Dim,
+                    new Rectangle(cx + S(11), y + S(7), cellW - S(14), S(12)), Theme.Dim,
                     TextFormatFlags.Left | TextFormatFlags.SingleLine);
                 DrawText(g, values[i], _owner._monoBigFont,
-                    new Rectangle(cx + S(9), y + S(18), cellW - S(12), S(15)),
+                    new Rectangle(cx + S(11), y + S(21), cellW - S(14), S(18)),
                     i == 0 ? Theme.Accent : i == 6 && values[i] == "未观测" ? Theme.Dim : Theme.Text,
                     TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             }
@@ -561,55 +541,54 @@ internal sealed class MainTraceWindow : Form
                 using var pen = new Pen(Theme.WithAlpha(Theme.IsLight ? 70 : 90, Theme.Accent), 1);
                 g.DrawPath(pen, path);
             }
-            int pad = S(12);
-            int leadW = S(200);
+            int pad = S(14);
+            int leadW = S(260);
             int x = rect.X + pad;
             DrawText(g, "运行总状态", _owner._tinyFont,
-                new Rectangle(x, rect.Y + S(5), leadW, S(11)), Theme.Accent,
+                new Rectangle(x, rect.Y + S(6), leadW, S(12)), Theme.Accent,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine);
             DrawText(g, s.MainStateText, _owner._heroFont,
-                new Rectangle(x - S(1), rect.Y + S(14), leadW, S(22)), Theme.Text,
+                new Rectangle(x - S(1), rect.Y + S(16), leadW, S(27)), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             int stateW = Measure(s.MainStateText, _owner._heroFont).Width;
-            int chipX = x + Math.Min(leadW - S(42), stateW + S(7));
-            DrawChip(g, s.SubStateText, chipX, rect.Y + S(21), Theme.Accent,
+            int chipX = x + Math.Min(leadW - S(48), stateW + S(8));
+            DrawChip(g, s.SubStateText, chipX, rect.Y + S(25), Theme.Accent,
                 Theme.WithAlpha(Theme.IsLight ? 24 : 32, Theme.Accent), _owner._chipFont);
             string note = s.HasData
                 ? (HasMainStateChange() ? "Idle 快照 · 已记录主状态切换" : "Idle 快照 · 未观测到主状态切换")
                 : "等待 #HH:MM:SS 快照";
             DrawText(g, note, _owner._tinyFont,
-                new Rectangle(x, rect.Y + S(39), leadW, S(11)), Theme.Dim,
+                new Rectangle(x, rect.Y + S(49), leadW, S(12)), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
 
-            int ringW = S(106);
+            int ringW = S(130);
             int metricX = rect.X + pad + leadW + S(2);
-            int metricW = Math.Max(S(180), rect.Right - pad - ringW - metricX);
+            int metricW = Math.Max(S(200), rect.Right - pad - ringW - metricX);
             int colW = metricW / 4;
             MainTraceReport? report = _owner._view.LastReport;
             DrawMetric(g, "快照周期", _owner._view.SnapshotPeriodText,
                 s.HasData ? _owner._view.SnapshotCount + " 条" : "", metricX, rect.Y, colW, rect.Height);
-            DrawMetric(g, "本次会话", _owner._view.SessionText, s.HasData ? "COM38" : "",
+            DrawMetric(g, "本次会话", _owner._view.SessionText, s.HasData ? SourceShort() : "",
                 metricX + colW, rect.Y, colW, rect.Height);
             DrawMetric(g, "最近报文", report is null ? "—" : report.Bytes + " B",
                 report is null ? "" : Age(report.EncodedAt), metricX + colW * 2, rect.Y, colW, rect.Height);
-            string soc = report?.SocPower is double power
-                ? power.ToString("0", CultureInfo.InvariantCulture)
-                : "未观测";
-            DrawMetric(g, "SoC 电源", soc, report?.SocPower is double ? "报文时点" : "等待来源",
-                metricX + colW * 3, rect.Y, colW, rect.Height);
+            string socSub = report?.SocPower is double power
+                ? "报文时点 " + power.ToString("0", CultureInfo.InvariantCulture)
+                : "等待来源";
+            DrawMetric(g, "SoC 电源", "未观测", socSub, metricX + colW * 3, rect.Y, colW, rect.Height);
 
             int ringX = rect.Right - pad - ringW + S(4);
-            DrawRing(g, new Rectangle(ringX, rect.Y + S(9), S(44), S(44)),
+            DrawRing(g, new Rectangle(ringX, rect.Y + S(12), S(52), S(52)),
                 _owner._view.CompleteRatio, s.HasData);
-            int textX = ringX + S(50);
+            int textX = ringX + S(60);
             DrawText(g, s.HasData ? _owner._view.CompleteSnapshotsText : "等待", _owner._eventTimeFont,
-                new Rectangle(textX, rect.Y + S(10), ringW - S(52), S(12)), Theme.Muted,
+                new Rectangle(textX, rect.Y + S(12), ringW - S(62), S(13)), Theme.Muted,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine);
             DrawText(g, "快照重组完整", _owner._tinyFont,
-                new Rectangle(textX, rect.Y + S(23), ringW - S(52), S(11)), Theme.Dim,
+                new Rectangle(textX, rect.Y + S(27), ringW - S(62), S(12)), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine);
             DrawText(g, "软换行已还原", _owner._tinyFont,
-                new Rectangle(textX, rect.Y + S(34), ringW - S(52), S(11)), Theme.Dim,
+                new Rectangle(textX, rect.Y + S(41), ringW - S(62), S(12)), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine);
         }
 
@@ -617,13 +596,13 @@ internal sealed class MainTraceWindow : Form
         {
             using (var pen = new Pen(Theme.WithAlpha(Theme.IsLight ? 30 : 42, Theme.Accent), 1))
                 g.DrawLine(pen, x, y + S(10), x, y + height - S(8));
-            int tx = x + S(8);
-            DrawText(g, label, _owner._tinyFont, new Rectangle(tx, y + S(9), width - S(10), S(11)), Theme.Dim,
+            int tx = x + S(9);
+            DrawText(g, label, _owner._tinyFont, new Rectangle(tx, y + S(11), width - S(12), S(12)), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine);
-            DrawText(g, value, _owner._kvValueFont, new Rectangle(tx, y + S(22), width - S(10), S(14)), Theme.Text,
+            DrawText(g, value, _owner._kvValueFont, new Rectangle(tx, y + S(26), width - S(12), S(16)), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             if (sub.Length > 0)
-                DrawText(g, sub, _owner._tinyFont, new Rectangle(tx, y + S(37), width - S(10), S(10)), Theme.Dim,
+                DrawText(g, sub, _owner._tinyFont, new Rectangle(tx, y + S(45), width - S(12), S(11)), Theme.Dim,
                     TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
         }
 
@@ -662,34 +641,34 @@ internal sealed class MainTraceWindow : Form
             DrawCard(g, rect, Theme.Raised, Theme.BorderSoft);
             int pad = S(9);
             DrawCardHeader(g, rect, pad, "网络与通信", "MOD / MQTT / QHTTP", Theme.Accent);
-            int body = rect.Y + S(32);
+            int body = rect.Y + S(42);
             DrawText(g, s.Operator.Length > 0 ? s.Operator : "—", _owner._bigFont,
-                new Rectangle(rect.X + pad, body, rect.Width - pad * 2, S(16)), Theme.Text,
+                new Rectangle(rect.X + pad, body, rect.Width - pad * 2, S(20)), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             string tech = (s.AccessTech.Length > 0 ? s.AccessTech : "—")
                           + (report?.Band is { Length: > 0 } band ? " · " + band : "");
-            DrawText(g, tech, _owner._tinyFont, new Rectangle(rect.X + pad, body + S(14), rect.Width - pad * 2, S(10)),
+            DrawText(g, tech, _owner._tinyFont, new Rectangle(rect.X + pad, body + S(18), rect.Width - pad * 2, S(12)),
                 Theme.Dim, TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
-            int y = body + S(28);
+            int y = body + S(38);
             int half = (rect.Width - pad * 2 - S(8)) / 2;
             DrawKv(g, "模组 / 步骤", s.ModemText + (s.ModemStep.Length > 0 ? " · " + s.ModemStep : ""),
                 rect.X + pad, y, half,
                 s.ModemState is "OFF" or "CLOSING" ? Theme.Danger : s.ModemState == "POWERSAVE" ? Theme.Amber : Theme.Green);
             DrawKv(g, "MQTT / QHTTP", s.MqttSummary + " / " + s.QhttpSummary,
                 rect.X + pad + half + S(8), y, half, Theme.Green);
-            y += S(18);
+            y += S(30);
             DrawKv(g, "信号 SIG", s.Sig.Length > 0 ? s.Sig + " 原始值" : "—", rect.X + pad, y, half, Theme.Text);
             string data = _owner._view.DataSent.Length > 0
                 ? "↑" + _owner._view.DataSent + " ↓" + _owner._view.DataRecv
                 : "—";
             DrawKvSmall(g, "数据计数", data, rect.X + pad + half + S(8), y, half, Theme.Text);
-            y += S(18);
+            y += S(30);
             DrawKvSmall(g, "LAC / CID · 报文时点", (report?.Lac.Length > 0 ? report.Lac : "—") + " / "
                 + (report?.Cid.Length > 0 ? report.Cid : "—"), rect.X + pad, y, rect.Width - pad * 2, Theme.Text);
             string note = s.HasData
                 ? "低功耗保持；SIG 不自动换算 dBm；LAC/CID 只在该条报文时点有效。"
                 : "收到快照后填入 MOD / MQTT / QHTTP 原值。";
-            DrawNote(g, note, new Rectangle(rect.X + pad, rect.Bottom - S(12), rect.Width - pad * 2, S(10)));
+            DrawNote(g, note, new Rectangle(rect.X + pad, rect.Bottom - S(14), rect.Width - pad * 2, S(12)));
         }
 
         private void DrawLocationCard(Graphics g, Rectangle rect)
@@ -698,106 +677,107 @@ internal sealed class MainTraceWindow : Form
             DrawCard(g, rect, Theme.Raised, Theme.BorderSoft);
             int pad = S(9);
             DrawCardHeader(g, rect, pad, "定位与电源", "GPS / BAT", Blue);
-            int body = rect.Y + S(32);
+            int body = rect.Y + S(42);
             DrawText(g, s.CoordinatesText, _owner._monoBigFont,
-                new Rectangle(rect.X + pad, body, rect.Width - pad * 2, S(16)), Theme.Text,
+                new Rectangle(rect.X + pad, body, rect.Width - pad * 2, S(20)), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             DrawText(g, s.GpsText, _owner._tinyFont,
-                new Rectangle(rect.X + pad, body + S(14), rect.Width - pad * 2, S(10)), Theme.Dim,
+                new Rectangle(rect.X + pad, body + S(18), rect.Width - pad * 2, S(12)), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
-            int y = body + S(28);
+            int y = body + S(38);
             int half = (rect.Width - pad * 2 - S(8)) / 2;
             DrawKv(g, "定位 / HDOP", s.GpsText, rect.X + pad, y, half, Theme.Green);
             DrawKv(g, "速度", s.SpeedText, rect.X + pad + half + S(8), y, half, Theme.Text);
-            y += S(18);
+            y += S(30);
             DrawKv(g, "电池", s.BatteryText, rect.X + pad, y, half, Theme.Green);
             DrawKvSmall(g, "电流", s.CurrentText + (s.ChargeFlag == "0" ? " · 未充电" : ""),
                 rect.X + pad + half + S(8), y, half, Theme.Text);
-            y += S(18);
+            y += S(30);
             DrawKvSmall(g, "容量 / 温度", s.CapacityText.Replace(" mAh", "mAh").Replace(" °C", "°C"),
                 rect.X + pad, y, half, Theme.Text);
             DrawKv(g, "行驶 / 分段", s.DrivingLabel + " · " + (s.GpsMileage.Length > 0 ? s.GpsMileage : "—"),
                 rect.X + pad + half + S(8), y, half, Theme.Text);
             DrawNote(g, s.HasData ? "坐标来自最新快照；年龄按主机时间，设备 RTC 仅作展示。" : "收到 GPS / BAT 快照后填入。",
-                new Rectangle(rect.X + pad, rect.Bottom - S(12), rect.Width - pad * 2, S(10)));
+                new Rectangle(rect.X + pad, rect.Bottom - S(14), rect.Width - pad * 2, S(12)));
         }
 
-        private int DrawSensor(Graphics g, int x, int y, int width, int height)
+        private int DrawPeripheral(Graphics g, int x, int y, int width, int height)
         {
-            DrawCard(g, new Rectangle(x, y, width, height), Theme.Raised, Theme.BorderSoft);
             MainTraceSnapshot s = _owner._view.Snapshot;
             MainTraceReport? report = _owner._view.LastReport;
-            int pad = S(9);
-            int cellW = width / 3;
-            int cellH = height - S(16);
-            MainTraceEvent? doorEvent = _owner._view.Events.FirstOrDefault(ev =>
-                ev.Kind == MainTraceEventKind.Sensor && ev.Text.Contains("门磁事件"));
-            string doorValue = s.HasData ? "门" + s.DoorLabel + " · RPD " + (s.Rpd.Length > 0 ? s.Rpd : "—") : "等待快照";
-            string doorEvidence = doorEvent is null ? "最近事件 未观测"
-                : "最近事件 " + doorEvent.Text.Replace("门磁事件 · ", "") + " · " + doorEvent.Time.ToString("HH:mm:ss");
-            DrawSensorCell(g, new Rectangle(x, y, cellW, cellH), "门磁 / RPD", "快照", doorValue,
-                doorEvidence, s.HasData ? Dash(s.DoorBound) + " 绑定 · 快照 " + s.HostTime.ToString("HH:mm:ss") : "等待快照");
-            string tpms = s.TpmsBound.Length > 0
-                ? s.TpmsBound + " 绑定" + (report?.TpmsCount is int t ? " · 报文 " + t + " 条" : "")
-                : "—";
-            DrawSensorCell(g, new Rectangle(x + cellW, y, cellW, cellH), "TPMS",
-                Dash(s.McuBleMode), tpms,
-                report?.TpmsCount is int count ? "报文 " + count + " 条 · 测量值语义待确认" : "测量未观测",
-                "策略是缓存值，不代表正在扫描");
-            string ths = report?.ThsText is { Length: > 0 } t2 ? t2 : (s.ThsBound.Length > 0 ? s.ThsBound + " 绑定 · 未观测" : "—");
-            DrawSensorCell(g, new Rectangle(x + cellW * 2, y, cellW, cellH), "THS",
-                Dash(s.SocBleMode), ths,
-                report?.ThsText is { Length: > 0 } ? "来自 " + report.EncodedAt.ToString("HH:mm:ss") + " 上报 JSON · 非实时" : "无报文时显示未观测",
-                "绑定数 " + Dash(s.ThsBound) + " · 策略 " + Dash(s.SocBleMode));
-            using (var pen = new Pen(Theme.BorderSoft, 1))
-                g.DrawLine(pen, x + pad, y + cellH, x + width - pad, y + cellH);
-            DrawText(g, "扫描模式是策略值；无报文时显示未观测，不能据此推断传感器在线、离线或故障。",
-                _owner._tinyFont, new Rectangle(x + pad, y + cellH, width - pad * 2, S(16)), Theme.Dim,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            var rect = new Rectangle(x, y, width, height);
+            using (var path = Theme.RoundedRect(rect, S(7)))
+            {
+                using var brush = new LinearGradientBrush(rect, Theme.Raised,
+                    Theme.Mix(Theme.Raised, Theme.Surface, Theme.IsLight ? 0.6f : 0.75f), 0f);
+                g.FillPath(brush, path);
+                using var pen = new Pen(Theme.BorderSoft, 1);
+                g.DrawPath(pen, path);
+            }
+            int pad = S(11);
+            int cx = rect.X + pad;
+            DrawText(g, "外设状态", _owner._chipFont,
+                new Rectangle(cx, rect.Y, S(52), height), Theme.Accent,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+            cx += S(54);
+            DrawPeripheralDivider(g, rect, ref cx);
+            string door = s.HasData ? s.DoorLabel + " · RPD " + Dash(s.Rpd) : "未观测";
+            cx = DrawPeripheralItem(g, rect, cx, "门磁", door);
+            DrawPeripheralDivider(g, rect, ref cx);
+            string tpms = report?.TpmsCount is int count
+                ? count + " 条"
+                : s.TpmsBound.Length > 0 ? s.TpmsBound + " 绑定" : "未观测";
+            cx = DrawPeripheralItem(g, rect, cx, "TPMS", tpms);
+            DrawPeripheralDivider(g, rect, ref cx);
+            string ths = report?.ThsText is { Length: > 0 } text
+                ? text
+                : s.ThsBound.Length > 0 ? s.ThsBound + " 绑定" : "未观测";
+            cx = DrawPeripheralItem(g, rect, cx, "THS", ths);
+            string note = "来源：最新快照 / 上报 JSON · 无报文时显示未观测";
+            int noteW = Measure(note, _owner._tinyFont).Width;
+            int noteX = rect.Right - pad - noteW;
+            if (noteX > cx + S(12))
+                DrawText(g, note, _owner._tinyFont, new Rectangle(noteX, rect.Y, noteW, height), Theme.Dim,
+                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             return y + height;
         }
 
-        private void DrawSensorCell(Graphics g, Rectangle rect, string title, string policy,
-            string value, string evidence, string note)
+        private void DrawPeripheralDivider(Graphics g, Rectangle rect, ref int x)
         {
-            int pad = S(10);
-            DrawText(g, title, _owner._tinyFont,
-                new Rectangle(rect.X + pad, rect.Y + S(5), rect.Width - pad * 2 - S(40), S(10)), Theme.Muted,
-                TextFormatFlags.Left | TextFormatFlags.SingleLine);
-            DrawText(g, policy, _owner._chipFont,
-                new Rectangle(rect.Right - pad - S(40), rect.Y + S(5), S(40), S(10)), Theme.Accent,
-                TextFormatFlags.Right | TextFormatFlags.SingleLine);
-            DrawText(g, value, _owner._bigFont,
-                new Rectangle(rect.X + pad, rect.Y + S(16), rect.Width - pad * 2, S(14)), Theme.Text,
-                TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
-            DrawText(g, evidence, _owner._tinyFont,
-                new Rectangle(rect.X + pad, rect.Y + S(29), rect.Width - pad * 2, S(10)), Theme.Muted,
-                TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
-            DrawText(g, note, _owner._tinyFont,
-                new Rectangle(rect.X + pad, rect.Y + S(39), rect.Width - pad * 2, S(10)), Theme.Dim,
-                TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+            using (var pen = new Pen(Theme.BorderSoft, 1))
+                g.DrawLine(pen, x, rect.Y + S(8), x, rect.Bottom - S(8));
+            x += S(9);
         }
 
-        private void DrawBottom(Graphics g, int x, int y, int width, int headingH, int cardH)
+        private int DrawPeripheralItem(Graphics g, Rectangle rect, int x, string label, string value)
+        {
+            string labelText = label + " ";
+            int labelW = Measure(labelText, _owner._chipFont).Width;
+            DrawText(g, labelText, _owner._chipFont, new Rectangle(x, rect.Y, labelW, rect.Height), Theme.Muted,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+            int valueW = Measure(value, _owner._chipFont).Width;
+            DrawText(g, value, _owner._chipFont, new Rectangle(x + labelW, rect.Y, valueW, rect.Height), Theme.Text,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+            return x + labelW + valueW;
+        }
+
+        private void DrawBottom(Graphics g, int x, int y, int width, int cardH)
         {
             int gap = S(10);
             int leftW = (width - gap) * 57 / 100;
             int rightW = width - gap - leftW;
-            DrawSection(g, "报文记录", "10–30 条滚动历史 · 含上行与下发", x, y, leftW);
-            DrawSection(g, "业务时间线", "关键过程与结果 · 不展开每个报文阶段", x + leftW + gap, y, rightW);
-            int cardY = y + headingH + S(3);
-            DrawMessageCard(g, new Rectangle(x, cardY, leftW, cardH));
-            DrawTimelineCard(g, new Rectangle(x + leftW + gap, cardY, rightW, cardH));
+            DrawMessageCard(g, new Rectangle(x, y, leftW, cardH));
+            DrawTimelineCard(g, new Rectangle(x + leftW + gap, y, rightW, cardH));
         }
 
         private void DrawMessageCard(Graphics g, Rectangle rect)
         {
             DrawCard(g, rect, Theme.Raised, Theme.BorderSoft);
-            int pad = S(8);
-            int toolbarH = S(32);
-            int detailH = S(76);
+            int pad = S(11);
+            int toolbarH = S(40);
+            int detailH = S(90);
             int listH = rect.Height - toolbarH - detailH;
-            DrawTabs(g, rect, pad, toolbarH);
+            DrawMessageToolbar(g, rect, pad, toolbarH);
             var list = new Rectangle(rect.X + S(1), rect.Y + toolbarH, rect.Width - S(2), listH);
             _owner._messageListRect = list;
             MainTraceReport? report = _owner._selectedReport ?? (_owner._view.Reports.Count > 0 ? _owner._view.Reports[0] : null);
@@ -805,7 +785,7 @@ internal sealed class MainTraceWindow : Form
 
             int count = _owner._messageTab == MessageTab.Up ? _owner._view.Reports.Count : _owner._view.Downlinks.Count;
             int limit = Math.Min(count, _owner._messageLimit);
-            int rowH = S(19);
+            int rowH = S(28);
             int visible = Math.Max(1, listH / rowH);
             _owner._messageVisibleRows = visible;
             int maxScroll = Math.Max(0, limit - visible);
@@ -816,8 +796,8 @@ internal sealed class MainTraceWindow : Form
                 string empty = _owner._messageTab == MessageTab.Up
                     ? "等待 encode report ok / mqtt publish 日志"
                     : "本会话未收到下发报文 · 等待 receive new cfg / cmd / upgrade";
-                DrawText(g, empty, _owner._subFont,
-                    new Rectangle(list.X + S(8), list.Y, list.Width - S(16), list.Height), Theme.Dim,
+                DrawText(g, empty, _owner._eventFont,
+                    new Rectangle(list.X + S(11), list.Y, list.Width - S(22), list.Height), Theme.Dim,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             }
             else
@@ -827,7 +807,7 @@ internal sealed class MainTraceWindow : Form
                     int index = _owner._messageScroll + i;
                     if (index >= limit) break;
                     int ry = list.Y + i * rowH;
-                    var row = new Rectangle(list.X + S(4), ry, list.Width - S(10), rowH);
+                    var row = new Rectangle(list.X + S(4), ry, list.Width - S(11), rowH);
                     if (_owner._messageTab == MessageTab.Up)
                     {
                         MainTraceReport item = _owner._view.Reports[index];
@@ -846,6 +826,7 @@ internal sealed class MainTraceWindow : Form
                 DrawScrollbar(g, list, _owner._messageScroll, limit, visible);
             }
             int detailY = rect.Bottom - detailH;
+            DrawDetailBackground(g, rect, detailY);
             using (var pen = new Pen(Theme.BorderSoft, 1))
                 g.DrawLine(pen, rect.X + pad, detailY, rect.Right - pad, detailY);
             var detailRect = new Rectangle(rect.X + pad, detailY, rect.Width - pad * 2, detailH);
@@ -855,38 +836,43 @@ internal sealed class MainTraceWindow : Form
                 _owner._messageTab == MessageTab.Down ? downlink : null);
         }
 
-        private void DrawTabs(Graphics g, Rectangle rect, int pad, int toolbarH)
+        private void DrawMessageToolbar(Graphics g, Rectangle rect, int pad, int toolbarH)
         {
-            int y = rect.Y + (toolbarH - S(16)) / 2;
+            int chipH = S(18);
+            int y = rect.Y + (toolbarH - chipH) / 2;
             int x = rect.X + pad;
+            DrawText(g, "报文记录", _owner._cardTitleFont,
+                new Rectangle(x, rect.Y, S(70), toolbarH), Theme.Text,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+            x += Measure("报文记录", _owner._cardTitleFont).Width + S(8);
             string up = "↑ 上行 " + _owner._view.Reports.Count;
             string down = "↓ 下发 " + _owner._view.Downlinks.Count;
-            Rectangle tabUp = DrawTab(g, up, x, y, _owner._messageTab == MessageTab.Up);
+            Rectangle tabUp = DrawTab(g, up, x, y, chipH, _owner._messageTab == MessageTab.Up);
             _owner._tabUpRect = tabUp;
-            _owner._tabDownRect = DrawTab(g, down, tabUp.Right + S(3), y, _owner._messageTab == MessageTab.Down);
+            _owner._tabDownRect = DrawTab(g, down, tabUp.Right + S(3), y, chipH, _owner._messageTab == MessageTab.Down);
             int count = _owner._messageTab == MessageTab.Up ? _owner._view.Reports.Count : _owner._view.Downlinks.Count;
-            string limit = "显示 " + _owner._messageLimit + " 条 ▾";
-            int limitW = Measure(limit, _owner._chipFont).Width + S(10);
-            Rectangle limitRect = new Rectangle(rect.Right - pad - limitW, y, limitW, S(16));
+            string limitText = "显示 " + _owner._messageLimit + " 条 ▾";
+            int limitW = Measure(limitText, _owner._chipFont).Width + S(14);
+            Rectangle limitRect = new Rectangle(rect.Right - pad - limitW, y, limitW, chipH);
             _owner._limitRect = limitRect;
             using (var path = Theme.RoundedRect(limitRect, S(4)))
             using (var brush = new SolidBrush(Theme.WithAlpha(Theme.IsLight ? 18 : 24, Theme.Text)))
                 g.FillPath(brush, path);
-            DrawText(g, limit, _owner._chipFont, limitRect, Theme.Muted,
+            DrawText(g, limitText, _owner._chipFont, limitRect, Theme.Muted,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             string countText = Math.Min(count, _owner._messageLimit) + " / " + count + " 条";
             int countW = Measure(countText, _owner._tinyFont).Width;
             DrawText(g, countText, _owner._tinyFont,
-                new Rectangle(limitRect.X - countW - S(8), y, countW, S(16)), Theme.Dim,
+                new Rectangle(limitRect.X - countW - S(8), rect.Y, countW, toolbarH), Theme.Dim,
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             using (var pen = new Pen(Theme.BorderSoft, 1))
                 g.DrawLine(pen, rect.X + pad, rect.Y + toolbarH, rect.Right - pad, rect.Y + toolbarH);
         }
 
-        private Rectangle DrawTab(Graphics g, string text, int x, int y, bool active)
+        private Rectangle DrawTab(Graphics g, string text, int x, int y, int height, bool active)
         {
-            int w = Measure(text, _owner._chipFont).Width + S(10);
-            var rect = new Rectangle(x, y, w, S(16));
+            int w = Measure(text, _owner._chipFont).Width + S(14);
+            var rect = new Rectangle(x, y, w, height);
             if (active)
             {
                 using var path = Theme.RoundedRect(rect, S(4));
@@ -898,6 +884,19 @@ internal sealed class MainTraceWindow : Form
             DrawText(g, text, _owner._chipFont, rect, active ? Theme.Accent : Theme.Dim,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             return rect;
+        }
+
+        private void DrawDetailBackground(Graphics g, Rectangle card, int top)
+        {
+            GraphicsState state = g.Save();
+            using (var clip = Theme.RoundedRect(card, S(8)))
+                g.SetClip(clip, CombineMode.Intersect);
+            using (var brush = new SolidBrush(Theme.Log))
+                g.FillRectangle(brush, card.X, top, card.Width, card.Bottom - top);
+            g.Restore(state);
+            using var border = new Pen(Theme.BorderSoft, 1);
+            using var path = Theme.RoundedRect(card, S(8));
+            g.DrawPath(border, path);
         }
 
         private void DrawMessageRow(Graphics g, Rectangle row, MainTraceReport? report,
@@ -916,11 +915,13 @@ internal sealed class MainTraceWindow : Form
                 using var pen = new Pen(Theme.WithAlpha(Theme.IsLight ? 18 : 30, Theme.BorderSoft), 1);
                 g.DrawLine(pen, row.X, row.Y, row.Right, row.Y);
             }
-            int x = row.X + S(5);
+            int chipH = S(16);
+            int chipY = row.Y + (row.Height - chipH) / 2;
+            int x = row.X + S(9);
             string time = report?.EncodedAt.ToString("HH:mm:ss") ?? downlink?.Time.ToString("HH:mm:ss") ?? "";
-            DrawText(g, time, _owner._eventTimeFont, new Rectangle(x, row.Y, S(55), row.Height), Theme.Dim,
+            DrawText(g, time, _owner._eventTimeFont, new Rectangle(x, row.Y, S(56), row.Height), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-            x += S(58);
+            x += S(61);
             string topic = report is not null ? "report" : downlink?.Topic ?? "";
             Color topicColor = report is not null ? Blue : downlink?.Topic switch
             {
@@ -928,20 +929,22 @@ internal sealed class MainTraceWindow : Form
                 "upgrade" => Theme.Amber,
                 _ => Theme.Green,
             };
-            var topicRect = new Rectangle(x, row.Y + (row.Height - S(13)) / 2, S(52), S(13));
+            var topicRect = new Rectangle(x, chipY, S(52), chipH);
             using (var path = Theme.RoundedRect(topicRect, S(3)))
             using (var brush = new SolidBrush(Theme.WithAlpha(Theme.IsLight ? 20 : 26, topicColor)))
                 g.FillPath(brush, path);
             DrawText(g, topic, _owner._chipFont, topicRect, topicColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-            x += S(57);
+            x += S(59);
+            var stateRect = new Rectangle(row.Right - S(20) - S(60), chipY, S(60), chipH);
+            var bytesRect = new Rectangle(stateRect.X - S(48), row.Y, S(44), row.Height);
+            int nameW = Math.Max(S(40), bytesRect.X - S(6) - x);
             string name = report is not null ? "位置报文" : downlink?.Summary ?? "";
             DrawText(g, name, _owner._eventFont,
-                new Rectangle(x, row.Y, Math.Max(S(40), row.Right - x - S(156)), row.Height), Theme.Text,
+                new Rectangle(x, row.Y, nameW, row.Height), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
-            int bytesX = row.Right - S(150);
             string bytes = report is not null ? report.Bytes + " B" : downlink?.Bytes + " B";
-            DrawText(g, bytes, _owner._eventTimeFont, new Rectangle(bytesX, row.Y, S(42), row.Height), Theme.Dim,
+            DrawText(g, bytes, _owner._eventTimeFont, bytesRect, Theme.Dim,
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             string state;
             Color stateColor;
@@ -962,13 +965,12 @@ internal sealed class MainTraceWindow : Form
                 state = "已收到";
                 stateColor = Blue;
             }
-            var stateRect = new Rectangle(row.Right - S(103), row.Y + (row.Height - S(13)) / 2, S(54), S(13));
             using (var path = Theme.RoundedRect(stateRect, S(3)))
             using (var brush = new SolidBrush(Theme.WithAlpha(Theme.IsLight ? 20 : 26, stateColor)))
                 g.FillPath(brush, path);
             DrawText(g, state, _owner._chipFont, stateRect, stateColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-            DrawText(g, "›", _owner._tinyFont, new Rectangle(row.Right - S(9), row.Y, S(8), row.Height), Theme.Dim,
+            DrawText(g, "›", _owner._chipFont, new Rectangle(row.Right - S(12), row.Y, S(9), row.Height), Theme.Dim,
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
         }
 
@@ -1015,16 +1017,16 @@ internal sealed class MainTraceWindow : Form
                 payload = "";
                 note = "收到 encode report ok / mqtt publish 或 receive new 后显示。";
             }
-            DrawText(g, header, _owner._tinyFont,
-                new Rectangle(rect.X, rect.Y + S(2), rect.Width - S(120), S(11)), Theme.Muted,
+            DrawText(g, header, _owner._eventFont,
+                new Rectangle(rect.X, rect.Y + S(7), rect.Width - S(150), S(15)), Theme.Muted,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             if (result.Length > 0)
-                DrawText(g, result, _owner._tinyFont,
-                    new Rectangle(rect.Right - S(120), rect.Y + S(2), S(120), S(11)), resultColor,
+                DrawText(g, result, _owner._chipFont,
+                    new Rectangle(rect.Right - S(150), rect.Y + S(7), S(150), S(15)), resultColor,
                     TextFormatFlags.Right | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             if (payload.Length > 0)
             {
-                var payloadRect = new Rectangle(rect.X, rect.Y + S(13), rect.Width, S(33));
+                var payloadRect = new Rectangle(rect.X, rect.Y + S(25), rect.Width, S(42));
                 GraphicsState state = g.Save();
                 g.SetClip(payloadRect);
                 DrawText(g, payload, _owner._detailFont, payloadRect, Theme.Muted,
@@ -1032,25 +1034,25 @@ internal sealed class MainTraceWindow : Form
                 g.Restore(state);
             }
             DrawText(g, note, _owner._tinyFont,
-                new Rectangle(rect.X, rect.Bottom - S(12), rect.Width - S(52), S(10)), Theme.Dim,
+                new Rectangle(rect.X, rect.Bottom - S(15), rect.Width - S(62), S(12)), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             DrawText(g, "查看原文 ›", _owner._chipFont,
-                new Rectangle(rect.Right - S(50), rect.Bottom - S(13), S(50), S(11)), Theme.Accent,
+                new Rectangle(rect.Right - S(58), rect.Bottom - S(16), S(58), S(13)), Theme.Accent,
                 TextFormatFlags.Right | TextFormatFlags.SingleLine);
         }
 
         private void DrawTimelineCard(Graphics g, Rectangle rect)
         {
             DrawCard(g, rect, Theme.Raised, Theme.BorderSoft);
-            int pad = S(8);
-            int toolbarH = S(32);
-            int detailH = S(58);
+            int pad = S(11);
+            int toolbarH = S(40);
+            int detailH = S(90);
             int listH = rect.Height - toolbarH - detailH;
             DrawTimelineToolbar(g, rect, pad, toolbarH);
             var list = new Rectangle(rect.X + S(1), rect.Y + toolbarH, rect.Width - S(2), listH);
             _owner._timelineListRect = list;
             List<MainTraceTimelineItem> items = _owner.FilteredTimeline();
-            int rowH = S(25);
+            int rowH = S(28);
             int visible = Math.Max(1, listH / rowH);
             _owner._timelineVisibleRows = visible;
             int maxScroll = Math.Max(0, items.Count - visible);
@@ -1058,8 +1060,8 @@ internal sealed class MainTraceWindow : Form
             _owner._timelineRects.Clear();
             if (items.Count == 0)
             {
-                DrawText(g, "暂无事件 · 等待主日志", _owner._subFont,
-                    new Rectangle(list.X + S(8), list.Y, list.Width - S(16), list.Height), Theme.Dim,
+                DrawText(g, "暂无事件 · 等待主日志", _owner._eventFont,
+                    new Rectangle(list.X + S(11), list.Y, list.Width - S(22), list.Height), Theme.Dim,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             }
             else
@@ -1071,7 +1073,7 @@ internal sealed class MainTraceWindow : Form
                     if (index >= items.Count) break;
                     MainTraceTimelineItem item = items[index];
                     int ry = list.Y + i * rowH;
-                    var row = new Rectangle(list.X + S(4), ry, list.Width - S(10), rowH);
+                    var row = new Rectangle(list.X + S(4), ry, list.Width - S(11), rowH);
                     bool isSelected = ReferenceEquals(item, selected);
                     if (isSelected)
                     {
@@ -1090,6 +1092,7 @@ internal sealed class MainTraceWindow : Form
                 DrawScrollbar(g, list, _owner._timelineScroll, items.Count, visible);
             }
             int detailY = rect.Bottom - detailH;
+            DrawDetailBackground(g, rect, detailY);
             using (var pen = new Pen(Theme.BorderSoft, 1))
                 g.DrawLine(pen, rect.X + pad, detailY, rect.Right - pad, detailY);
             var detailRect = new Rectangle(rect.X + pad, detailY, rect.Width - pad * 2, detailH);
@@ -1100,9 +1103,10 @@ internal sealed class MainTraceWindow : Form
 
         private void DrawTimelineToolbar(Graphics g, Rectangle rect, int pad, int toolbarH)
         {
-            int y = rect.Y + (toolbarH - S(16)) / 2;
-            DrawText(g, "最近事件", _owner._cardTitleFont,
-                new Rectangle(rect.X + pad, rect.Y, S(52), toolbarH), Theme.Text,
+            int chipH = S(18);
+            int y = rect.Y + (toolbarH - chipH) / 2;
+            DrawText(g, "业务时间线", _owner._cardTitleFont,
+                new Rectangle(rect.X + pad, rect.Y, S(80), toolbarH), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             _owner._filterRects.Clear();
             string[] labels = { "全部", "状态", "报文", "传感器", "异常", "拍照" };
@@ -1114,8 +1118,8 @@ internal sealed class MainTraceWindow : Form
             int right = rect.Right - pad;
             for (int i = labels.Length - 1; i >= 0; i--)
             {
-                int w = Measure(labels[i], _owner._chipFont).Width + S(7);
-                var r = new Rectangle(right - w, y, w, S(16));
+                int w = Measure(labels[i], _owner._chipFont).Width + S(10);
+                var r = new Rectangle(right - w, y, w, chipH);
                 right -= w + S(2);
                 _owner._filterRects.Add((filters[i], r));
                 bool active = _owner._timelineFilter == filters[i];
@@ -1136,27 +1140,30 @@ internal sealed class MainTraceWindow : Form
 
         private void DrawTimelineRow(Graphics g, Rectangle row, MainTraceTimelineItem item)
         {
-            int x = row.X + S(4);
+            int x = row.X + S(9);
             DrawText(g, item.Time.ToString("HH:mm:ss.fff"), _owner._eventTimeFont,
-                new Rectangle(x, row.Y, S(56), row.Height), Theme.Dim,
+                new Rectangle(x, row.Y, S(62), row.Height), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-            x += S(58);
+            x += S(66);
             Color tagColor = KindColor(item.Kind);
-            var tag = new Rectangle(x, row.Y + (row.Height - S(13)) / 2, S(36), S(13));
+            int chipH = S(16);
+            var tag = new Rectangle(x, row.Y + (row.Height - chipH) / 2, S(46), chipH);
             using (var path = Theme.RoundedRect(tag, S(3)))
             using (var brush = new SolidBrush(Theme.WithAlpha(Theme.IsLight ? 22 : 28, tagColor)))
                 g.FillPath(brush, path);
             DrawText(g, item.Tag, _owner._chipFont, tag, tagColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-            x += S(40);
+            x += S(50);
+            var srcRect = new Rectangle(row.Right - S(56), row.Y, S(42), row.Height);
+            int textW = Math.Max(S(40), srcRect.X - S(6) - x);
             DrawText(g, item.Text, _owner._eventFont,
-                new Rectangle(x, row.Y, Math.Max(S(50), row.Right - x - S(48)), row.Height), Theme.Muted,
+                new Rectangle(x, row.Y, textW, row.Height), Theme.Muted,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             DrawText(g, item.Source, _owner._tinyFont,
-                new Rectangle(row.Right - S(46), row.Y, S(42), row.Height), Theme.Dim,
+                srcRect, Theme.Dim,
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
-            DrawText(g, "›", _owner._tinyFont,
-                new Rectangle(row.Right - S(10), row.Y, S(9), row.Height), Theme.Dim,
+            DrawText(g, "›", _owner._chipFont,
+                new Rectangle(row.Right - S(12), row.Y, S(9), row.Height), Theme.Dim,
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
         }
 
@@ -1164,25 +1171,25 @@ internal sealed class MainTraceWindow : Form
         {
             if (item is null)
             {
-                DrawText(g, "选择事件查看原始证据", _owner._subFont, rect, Theme.Dim,
+                DrawText(g, "选择事件查看原始证据", _owner._eventFont, rect, Theme.Dim,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
                 return;
             }
             string head = item.Tag + " · " + item.Text;
-            DrawText(g, head, _owner._tinyFont,
-                new Rectangle(rect.X, rect.Y + S(2), rect.Width - S(48), S(11)), Theme.Muted,
+            DrawText(g, head, _owner._eventFont,
+                new Rectangle(rect.X, rect.Y + S(7), rect.Width - S(52), S(15)), Theme.Muted,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
             DrawText(g, "原文 ›", _owner._chipFont,
-                new Rectangle(rect.Right - S(42), rect.Y + S(2), S(42), S(11)), Theme.Accent,
+                new Rectangle(rect.Right - S(48), rect.Y + S(7), S(48), S(15)), Theme.Accent,
                 TextFormatFlags.Right | TextFormatFlags.SingleLine);
-            var rawRect = new Rectangle(rect.X, rect.Y + S(14), rect.Width, S(24));
+            var rawRect = new Rectangle(rect.X, rect.Y + S(25), rect.Width, S(42));
             GraphicsState state = g.Save();
             g.SetClip(rawRect);
             DrawText(g, item.Raw, _owner._detailFont, rawRect, Theme.Muted,
                 TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
             g.Restore(state);
             DrawText(g, item.Source, _owner._tinyFont,
-                new Rectangle(rect.X, rect.Bottom - S(10), rect.Width, S(9)), Theme.Dim,
+                new Rectangle(rect.X, rect.Bottom - S(15), rect.Width, S(12)), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine);
         }
 
@@ -1204,25 +1211,25 @@ internal sealed class MainTraceWindow : Form
         private void DrawCardHeader(Graphics g, Rectangle rect, int pad, string title, string note, Color color)
         {
             using (var brush = new SolidBrush(color))
-                g.FillEllipse(brush, rect.X + pad, rect.Y + S(12), S(5), S(5));
+                g.FillEllipse(brush, rect.X + pad, rect.Y + S(14), S(6), S(6));
             DrawText(g, title, _owner._cardTitleFont,
-                new Rectangle(rect.X + pad + S(9), rect.Y, rect.Width - pad * 2 - S(100), S(27)), Theme.Text,
+                new Rectangle(rect.X + pad + S(11), rect.Y, rect.Width - pad * 2 - S(110), S(32)), Theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             int noteW = Measure(note, _owner._tinyFont).Width;
             DrawText(g, note, _owner._tinyFont,
-                new Rectangle(rect.Right - pad - noteW, rect.Y, noteW, S(27)), Theme.Dim,
+                new Rectangle(rect.Right - pad - noteW, rect.Y, noteW, S(32)), Theme.Dim,
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
             using (var pen = new Pen(Theme.BorderSoft, 1))
-                g.DrawLine(pen, rect.X + pad, rect.Y + S(27), rect.Right - pad, rect.Y + S(27));
+                g.DrawLine(pen, rect.X + pad, rect.Y + S(32), rect.Right - pad, rect.Y + S(32));
         }
 
         private void DrawKv(Graphics g, string label, string value, int x, int y, int width, Color color,
             Font? valueFont = null)
         {
-            DrawText(g, label, _owner._kvLabelFont, new Rectangle(x, y, width, S(9)), Theme.Dim,
+            DrawText(g, label, _owner._kvLabelFont, new Rectangle(x, y, width, S(12)), Theme.Dim,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine);
             DrawText(g, value, valueFont ?? _owner._kvValueFont,
-                new Rectangle(x, y + S(8), width, S(11)), color,
+                new Rectangle(x, y + S(11), width, S(15)), color,
                 TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
         }
 
@@ -1275,6 +1282,13 @@ internal sealed class MainTraceWindow : Form
         private bool HasMainStateChange() =>
             _owner._view.Events.Any(ev => ev.Kind == MainTraceEventKind.State
                                           && ev.Text.StartsWith("主状态 ", StringComparison.Ordinal));
+
+        private string SourceShort()
+        {
+            string label = _owner._sourceLabel();
+            int cut = label.IndexOf(" · ", StringComparison.Ordinal);
+            return cut > 0 ? label.Substring(0, cut) : label;
+        }
 
         private static string Dash(string value) => value.Length > 0 ? value : "—";
 
