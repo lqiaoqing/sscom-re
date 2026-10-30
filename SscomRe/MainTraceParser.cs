@@ -83,7 +83,8 @@ internal sealed record MainTraceTimelineItem(
     string Text,
     string Source,
     string Raw,
-    bool Alert)
+    bool Alert,
+    bool Diagnostic = false)
 {
     public string Tag => Kind switch
     {
@@ -109,6 +110,92 @@ internal sealed record MainTraceBindingInfo(
     DateTime At)
 {
     public static MainTraceBindingInfo Empty { get; } = new(0, 0, 0, "", "", "", "", DateTime.MinValue);
+}
+
+internal sealed record MainTraceFixInfo(
+    double Latitude,
+    double Longitude,
+    DateTime ObservedAt,
+    string Source,
+    string FixState,
+    double? Hdop)
+{
+    public string CoordinatesText =>
+        Latitude.ToString("0.######", CultureInfo.InvariantCulture) + ", "
+        + Longitude.ToString("0.######", CultureInfo.InvariantCulture);
+}
+
+internal sealed record MainTraceIncident(
+    DateTime Time,
+    string Module,
+    string Severity,
+    string Summary,
+    string Raw,
+    string Source,
+    MainTraceFixInfo? ReferenceFix);
+
+internal sealed record MainTracePowerInfo
+{
+    public DateTime? LastWakeAt { get; init; }
+    public string LastWakeText { get; init; } = "";
+    public string LastWakeSource { get; init; } = "未观测";
+    public DateTime? SleepPrepareAt { get; init; }
+    public string SleepPrepareText { get; init; } = "";
+    public DateTime? NextWakeObservedAt { get; init; }
+    public string NextWakeDeviceTime { get; init; } = "";
+    public int? NextWakeWaitSeconds { get; init; }
+    public string NextWakeSource { get; init; } = "";
+    public int? LastWakeDurationSeconds { get; init; }
+    public DateTime? LastModemWakeAt { get; init; }
+    public string LastModemWakeText { get; init; } = "";
+    public DateTime? BackoffAt { get; init; }
+    public int? BackoffSeconds { get; init; }
+    public string BackoffText { get; init; } = "";
+    public DateTime? AtBusyAt { get; init; }
+    public string AtBusyText { get; init; } = "";
+    public DateTime? ExitPowerFailAt { get; init; }
+    public string ExitPowerFailText { get; init; } = "";
+
+    public static MainTracePowerInfo Empty { get; } = new();
+}
+
+internal sealed record MainTraceBleInfo
+{
+    public string McuIntervalText { get; init; } = "";
+    public string McuDurationText { get; init; } = "";
+    public string SocIntervalText { get; init; } = "";
+    public string SocDurationText { get; init; } = "";
+    public bool SocUnitKnown { get; init; }
+    public string Source { get; init; } = "";
+    public string McuSource { get; init; } = "";
+    public string SocSource { get; init; } = "";
+    public DateTime? ObservedAt { get; init; }
+    public string LastFailureText { get; init; } = "";
+    public DateTime? FailureAt { get; init; }
+
+    public static MainTraceBleInfo Empty { get; } = new();
+}
+
+internal sealed record MainTraceTpmsInfo(
+    string Mac,
+    int? Type,
+    double? PressureRaw,
+    double? TemperatureC,
+    int? AlarmRaw,
+    int? PowerRaw,
+    DateTime ObservedAt,
+    string Source);
+
+internal sealed record MainTraceTimelineCounts(
+    int All,
+    int Report,
+    int State,
+    int Network,
+    int Sensor,
+    int Alert,
+    int Camera)
+{
+    public static MainTraceTimelineCounts Empty { get; } = new(0, 0, 0, 0, 0, 0, 0);
 }
 
 internal sealed record MainTraceSnapshot
@@ -242,6 +329,7 @@ internal sealed record MainTraceReport
     public string Topic { get; init; } = "";
     public string PayloadJson { get; init; } = "";
     public string MaskedPayload { get; init; } = "";
+    public string Raw { get; init; } = "";
     public bool JsonComplete { get; init; }
     public double? SocPower { get; init; }
 
@@ -348,6 +436,21 @@ internal sealed record MainTraceView
     public IReadOnlyList<MainTraceLinkStage> LinkStages { get; init; } = Array.Empty<MainTraceLinkStage>();
     public IReadOnlyList<string> Alerts { get; init; } = Array.Empty<string>();
     public MainTraceBindingInfo Bindings { get; init; } = MainTraceBindingInfo.Empty;
+    public MainTraceFixInfo? Fix { get; init; }
+    public MainTraceIncident? Incident { get; init; }
+    public MainTracePowerInfo Power { get; init; } = MainTracePowerInfo.Empty;
+    public MainTraceBleInfo Ble { get; init; } = MainTraceBleInfo.Empty;
+    public IReadOnlyList<MainTraceTpmsInfo> Tpms { get; init; } = Array.Empty<MainTraceTpmsInfo>();
+    public MainTraceTimelineCounts TimelineCounts { get; init; } = MainTraceTimelineCounts.Empty;
+    public bool DoorOpenActive { get; init; }
+    public DateTime? DoorOpenSince { get; init; }
+    public int? LastDoorDurationSeconds { get; init; }
+    public string DoorObservationSource { get; init; } = "";
+    public int MqttConnectSuccessCount { get; init; }
+    public int MqttRetryCount { get; init; }
+    public int MqttReconnectCount { get; init; }
+    public int QhttpOkCount { get; init; }
+    public int QhttpErrCount { get; init; }
 
     public bool HasData { get; init; }
     public DateTime SessionStarted { get; init; }
@@ -371,6 +474,98 @@ internal sealed record MainTraceView
     public int ReportSuccessCount => Reports.Count(report => report.BusinessSuccess);
     public int ReportUnobservedCount =>
         Reports.Count(report => report.Outcome == MainTraceReportOutcome.ApiReturned);
+
+    public int PublishSuccessLogCount => Reports.Count(report => report.HasApi || report.BusinessSuccess);
+    public int TailLogCount => Reports.Count(report => report.BusinessSuccess);
+    public int ReportFailedCount => Reports.Count(report => report.Failed);
+    public int ReportUnlinkedCount =>
+        Reports.Count(report => report.HasApi || report.BusinessSuccess || report.Failed);
+    public int ReportPendingCount =>
+        Reports.Count(report => !report.HasApi && !report.BusinessSuccess && !report.Failed);
+    public string ConfirmedSuccessRateText => "—";
+
+    public string ReportIntervalAverageText
+    {
+        get
+        {
+            List<double> gaps = ReportSuccessGaps();
+            return gaps.Count > 0
+                ? FormatDuration(gaps.Average())
+                : "—";
+        }
+    }
+
+    public string ReportIntervalMaxText
+    {
+        get
+        {
+            List<double> gaps = ReportSuccessGaps();
+            return gaps.Count > 0 ? FormatDuration(gaps.Max()) : "—";
+        }
+    }
+
+    public int ReportIntervalSampleCount
+    {
+        get
+        {
+            int count = Reports.Count(report => (report.ApiAt ?? report.BusinessSuccessAt) is not null);
+            return Math.Max(0, count);
+        }
+    }
+
+    public string ReportIntervalRangeText
+    {
+        get
+        {
+            DateTime[] times = ReportSuccessTimes();
+            return times.Length >= 2
+                ? times[0].ToString("HH:mm:ss", CultureInfo.InvariantCulture) + " → "
+                  + times[times.Length - 1].ToString("HH:mm:ss", CultureInfo.InvariantCulture)
+                : "—";
+        }
+    }
+
+    private List<double> ReportSuccessGaps()
+    {
+        DateTime[] times = ReportSuccessTimes();
+        var gaps = new List<double>();
+        for (int i = 1; i < times.Length; i++)
+        {
+            double seconds = (times[i] - times[i - 1]).TotalSeconds;
+            if (seconds >= 0) gaps.Add(seconds);
+        }
+        return gaps;
+    }
+
+    private DateTime[] ReportSuccessTimes() =>
+        Reports
+            .Select(report => report.ApiAt ?? report.BusinessSuccessAt)
+            .Where(time => time is not null)
+            .Select(time => time!.Value)
+            .OrderBy(time => time)
+            .ToArray();
+
+    private static string FormatDuration(double seconds)
+    {
+        seconds = Math.Max(0, seconds);
+        if (seconds < 60) return Math.Round(seconds).ToString("0", CultureInfo.InvariantCulture) + " s";
+        int minutes = (int)(seconds / 60);
+        int rest = (int)Math.Round(seconds - minutes * 60);
+        return rest == 60 ? (minutes + 1) + "m" : minutes + "m " + rest.ToString("00", CultureInfo.InvariantCulture) + "s";
+    }
+
+    public string SessionClockText
+    {
+        get
+        {
+            if (SessionStarted == DateTime.MinValue) return "00:00:00";
+            TimeSpan span = DateTime.Now - SessionStarted;
+            if (span < TimeSpan.Zero) span = TimeSpan.Zero;
+            return ((int)span.TotalHours).ToString("00", CultureInfo.InvariantCulture) + ":"
+                + span.Minutes.ToString("00", CultureInfo.InvariantCulture) + ":"
+                + span.Seconds.ToString("00", CultureInfo.InvariantCulture);
+        }
+    }
 
     public string CompleteSnapshotsText =>
         SnapshotCount > 0 ? (SnapshotCount - MalformedSnapshots) + " / " + SnapshotCount : "—";
@@ -405,6 +600,12 @@ internal sealed class MainTraceParser
     private const int MaxReports = 200;
     private const int MaxCurrentChars = 64 * 1024;
     private const int MaxLineChars = 16 * 1024;
+
+    private static readonly HashSet<string> SnapshotSectionLabels = new(StringComparer.Ordinal)
+    {
+        "MOD", "MQTT", "QHTTP", "SIG", "GPS", "f_spd", "BAT", "DOOR", "RPD",
+        "MCU_BLE", "SOC_BLE", "TPMS", "THS", "SOC", "SOC_ERR", "LDR", "TH", "MEM",
+    };
 
     private static readonly Regex PwdPattern = new(
         "\"pwd\"\\s*:\\s*\"[^\"]*\"", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -446,6 +647,45 @@ internal sealed class MainTraceParser
     private string _dataRecv = "";
     private double? _snapshotPeriod;
     private MainTraceBindingInfo _bindings = MainTraceBindingInfo.Empty;
+    private MainTraceFixInfo? _lastFix;
+    private MainTraceIncident? _lastIncident;
+    private MainTracePowerInfo _power = MainTracePowerInfo.Empty;
+    private MainTraceBleInfo _ble = MainTraceBleInfo.Empty;
+    private IReadOnlyList<MainTraceTpmsInfo> _tpms = Array.Empty<MainTraceTpmsInfo>();
+    private bool _doorOpenActive;
+    private DateTime? _doorOpenSince;
+    private int? _lastDoorDurationSeconds;
+    private string _doorObservationSource = "";
+    private int _mqttConnectSuccessCount;
+    private int _mqttRetryCount;
+    private int _mqttReconnectCount;
+    private bool _mqttDisconnected;
+    private int _qhttpOkCount;
+    private int _qhttpErrCount;
+    private int _timelineReportTotal;
+    private int _timelineStateCount;
+    private int _timelineNetworkCount;
+    private int _timelineSensorCount;
+    private int _timelineAlertCount;
+    private int _timelineCameraCount;
+    private int _timelineLocalCount;
+
+    public void BeginSession()
+    {
+        lock (_gate)
+        {
+            if (_sessionStarted == DateTime.MinValue)
+                _sessionStarted = DateTime.Now;
+        }
+    }
+
+    internal void FlushPendingForTest()
+    {
+        lock (_gate)
+        {
+            if (_hasCurrent) FinalizeCurrent();
+        }
+    }
 
     public void Reset()
     {
@@ -467,6 +707,20 @@ internal sealed class MainTraceParser
             _dataSent = _dataRecv = "";
             _snapshotPeriod = null;
             _bindings = MainTraceBindingInfo.Empty;
+            _lastFix = null;
+            _lastIncident = null;
+            _power = MainTracePowerInfo.Empty;
+            _ble = MainTraceBleInfo.Empty;
+            _tpms = Array.Empty<MainTraceTpmsInfo>();
+            _doorOpenActive = false;
+            _doorOpenSince = null;
+            _lastDoorDurationSeconds = null;
+            _doorObservationSource = "";
+            _mqttConnectSuccessCount = _mqttRetryCount = _mqttReconnectCount = 0;
+            _mqttDisconnected = false;
+            _qhttpOkCount = _qhttpErrCount = 0;
+            _timelineReportTotal = _timelineStateCount = _timelineNetworkCount = 0;
+            _timelineSensorCount = _timelineAlertCount = _timelineCameraCount = _timelineLocalCount = 0;
         }
     }
 
@@ -511,16 +765,40 @@ internal sealed class MainTraceParser
             MainTraceEvent[] events = _events.ToArray();
             MainTraceReport? last = reports.Length > 0 ? reports[0] : null;
             var alerts = BuildAlerts(last);
+            List<MainTraceTimelineItem> timeline = BuildTimeline(reports, downlinks, events);
             return new MainTraceView
             {
                 Snapshot = _snapshot,
                 Events = events,
                 Reports = reports,
                 Downlinks = downlinks,
-                Timeline = BuildTimeline(reports, downlinks, events),
+                Timeline = timeline,
+                TimelineCounts = new MainTraceTimelineCounts(
+                    _timelineReportTotal + _downlinkCount + _timelineStateCount + _timelineNetworkCount
+                    + _timelineSensorCount + _timelineAlertCount + _timelineCameraCount + _timelineLocalCount,
+                    _timelineReportTotal + _downlinkCount,
+                    _timelineStateCount,
+                    _timelineNetworkCount,
+                    _timelineSensorCount,
+                    _timelineAlertCount,
+                    _timelineCameraCount),
                 LinkStages = BuildLinkStages(_snapshot, last),
                 Alerts = alerts,
                 Bindings = _bindings,
+                Fix = _lastFix,
+                Incident = _lastIncident,
+                Power = _power,
+                Ble = _ble,
+                Tpms = _tpms,
+                DoorOpenActive = _doorOpenActive,
+                DoorOpenSince = _doorOpenSince,
+                LastDoorDurationSeconds = _lastDoorDurationSeconds,
+                DoorObservationSource = _doorObservationSource,
+                MqttConnectSuccessCount = _mqttConnectSuccessCount,
+                MqttRetryCount = _mqttRetryCount,
+                MqttReconnectCount = _mqttReconnectCount,
+                QhttpOkCount = _qhttpOkCount,
+                QhttpErrCount = _qhttpErrCount,
                 HasData = _snapshot.HasData || _snapshots > 0 || _events.Count > 0 || _downlinks.Count > 0,
                 SessionStarted = _sessionStarted,
                 LastUpdate = _lastUpdate,
@@ -573,6 +851,7 @@ internal sealed class MainTraceParser
         if (body.Length == 0) return;
         string trimmed = body.TrimStart();
         bool startsNew = IsLogicalStart(trimmed);
+        if (!startsNew) startsNew = LooksLikeArtifactPrefixedStart(trimmed);
         if (startsNew)
         {
             body = trimmed;
@@ -623,11 +902,35 @@ internal sealed class MainTraceParser
             "encode report ", "workingMode ", "batteryMode ", "Sensor info show:",
             "BLE ", "loading snapshot ", "snapshot command received!", "Record command received!",
             "LiveStream command received!", "gps payload ", "modem ", "tracker_config_write_data",
+            "enter powersave state", "wakeup from powersave mode", "powersave wakeup adjusted",
+            "Enter standby", "exit power save failed", "Modem backoff delay", "blocking AT reentry",
+            "mqtt_send publish", "wakeup failed, reinit modem", "qhttp post",
+            "received new pic file:", "Picture to upload", "set mcu ble", "set soc ble",
+            "System Restarting",
         };
         foreach (string prefix in prefixes)
             if (body.StartsWith(prefix, StringComparison.Ordinal)) return true;
         return false;
     }
+
+    private static bool LooksLikeArtifactPrefixedStart(string body)
+    {
+        if (body.Length == 0) return false;
+        char first = body[0];
+        if (first is not ('.' or '\\' or '\0' or '/')) return false;
+        foreach (string fragment in ArtifactStartFragments)
+            if (body.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        return false;
+    }
+
+    private static readonly string[] ArtifactStartFragments =
+    {
+        "enter powersave state", "wakeup from powersave mode", "powersave wakeup adjusted",
+        "Enter standby", "exit power save failed", "Modem backoff delay",
+        "blocking AT reentry", "blocking AT recv URC", "modem wakeup request",
+        "mqtt_send publish delayed", "wakeup failed, reinit modem",
+        "set mcu ble", "set soc ble", "mcu ble scan=", "soc ble scan=",
+    };
 
     private void TryFinalizeCompleteCurrent()
     {
@@ -643,6 +946,7 @@ internal sealed class MainTraceParser
         if (!_hasCurrent || _lastCharTick == 0) return;
         double idle = (Stopwatch.GetTimestamp() - _lastCharTick) / (double)Stopwatch.Frequency;
         string current = _current.ToString();
+        if (current.Length < 10 && current[0] == '#') return;
         bool structured = current[0] == '#' || current.IndexOf("encode report ok(", StringComparison.Ordinal) >= 0;
         if (idle < (structured ? 1.0 : 0.22)) return;
         FinalizeCurrent();
@@ -703,6 +1007,12 @@ internal sealed class MainTraceParser
                 deviceTime = "";
         }
 
+        if (message.Length < 10)
+        {
+            _snapshots++;
+            _malformedSnapshots++;
+            return;
+        }
         int modelEnd = message.IndexOf(":[", 10, StringComparison.Ordinal);
         if (modelEnd <= 10)
         {
@@ -712,7 +1022,10 @@ internal sealed class MainTraceParser
         }
         string model = message.Substring(10, modelEnd - 10).Trim();
         string[] modelFields = Fields(Section(message, model));
-        if (model.Length == 0 || modelFields.Length < 5)
+        if (model.Length == 0 || modelFields.Length < 5
+            || SnapshotSectionLabels.Contains(model)
+            || !IsPlausibleState(modelFields[3])
+            || !IsPlausibleState(modelFields[4]))
         {
             _snapshots++;
             _malformedSnapshots++;
@@ -823,6 +1136,10 @@ internal sealed class MainTraceParser
             _snapshotPeriod = (host - previous.HostTime).TotalSeconds;
         _snapshot = snapshot;
         _lastUpdate = host;
+        if (snapshot.MainState == "STARTUP" && !string.Equals(previous.MainState, "STARTUP", StringComparison.Ordinal))
+            ResetRuntimeAfterRestart();
+        UpdateFix(snapshot, host);
+        UpdateDoorFromSnapshot(previous, snapshot, host);
 
         if (!previous.HasData)
         {
@@ -871,9 +1188,92 @@ internal sealed class MainTraceParser
         void Changed(string before, string after, string label)
         {
             if (before.Length == 0 || after.Length == 0 || before == after) return;
+            if (!IsPlausibleState(before) || !IsPlausibleState(after)) return;
             AddEvent(MainTraceEventKind.State, label + " " + before + " → " + after,
                 "快照推断", snapshot.Raw);
         }
+    }
+
+    private void ResetRuntimeAfterRestart()
+    {
+        _lastFix = null;
+        _doorOpenActive = false;
+        _doorOpenSince = null;
+        _doorObservationSource = "重启";
+        _power = MainTracePowerInfo.Empty;
+    }
+
+    private void UpdateFix(MainTraceSnapshot snapshot, DateTime host)
+    {
+        if (snapshot.GpsPower != "ON") return;
+        if (Int(snapshot.GpsFixState) is not int state || state is not (1 or 2)) return;
+        if (snapshot.Latitude is not double lat || snapshot.Longitude is not double lon) return;
+        if (double.IsNaN(lat) || double.IsInfinity(lat) || double.IsNaN(lon) || double.IsInfinity(lon)) return;
+        if (lat is < -90 or > 90 || lon is < -180 or > 180) return;
+        _lastFix = new MainTraceFixInfo(lat, lon, host, "GPS 快照", snapshot.GpsFixState, snapshot.Hdop);
+    }
+
+    private void UpdateDoorFromSnapshot(MainTraceSnapshot previous, MainTraceSnapshot snapshot, DateTime host)
+    {
+        switch (snapshot.DoorState)
+        {
+            case "OPEN":
+                if (!_doorOpenActive)
+                {
+                    _doorOpenActive = true;
+                    _doorOpenSince = host;
+                    _doorObservationSource = "快照";
+                }
+                break;
+            case "CLOSE":
+            case "INVALID":
+                if (_doorOpenActive)
+                {
+                    if (_doorOpenSince is DateTime since && host >= since)
+                        _lastDoorDurationSeconds = (int)Math.Round((host - since).TotalSeconds);
+                    _doorOpenActive = false;
+                    _doorOpenSince = null;
+                    _doorObservationSource = "快照";
+                }
+                break;
+        }
+    }
+
+    private void UpdateDoorFromEvent(bool open, DateTime now, string source)
+    {
+        if (open)
+        {
+            if (!_doorOpenActive)
+            {
+                _doorOpenActive = true;
+                _doorOpenSince = now;
+                _doorObservationSource = source;
+            }
+        }
+        else if (_doorOpenActive)
+        {
+            if (_doorOpenSince is DateTime since && now >= since)
+                _lastDoorDurationSeconds = (int)Math.Round((now - since).TotalSeconds);
+            _doorOpenActive = false;
+            _doorOpenSince = null;
+            _doorObservationSource = source;
+        }
+    }
+
+    private static string ModuleOf(string raw, string source)
+    {
+        Match match = Regex.Match(raw, @"\\([A-Za-z0-9_]+\.c)\(\d+\)", RegexOptions.CultureInvariant);
+        if (match.Success) return match.Groups[1].Value;
+        return source;
+    }
+
+    private static string SeverityOf(string raw)
+    {
+        if (raw.IndexOf("[ERROR", StringComparison.OrdinalIgnoreCase) >= 0) return "ERROR";
+        if (raw.IndexOf("[WARN", StringComparison.OrdinalIgnoreCase) >= 0) return "WARN";
+        if (raw.IndexOf("[INFO", StringComparison.OrdinalIgnoreCase) >= 0) return "INFO";
+        if (raw.IndexOf("[DEBUG", StringComparison.OrdinalIgnoreCase) >= 0) return "DEBUG";
+        return "未标级";
     }
 
     private void ParseEvent(string message)
@@ -883,14 +1283,190 @@ internal sealed class MainTraceParser
         DateTime now = DateTime.Now;
         long tick = Stopwatch.GetTimestamp();
 
+        if (text.IndexOf("System Restarting", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            ResetRuntimeAfterRestart();
+            AddEvent(MainTraceEventKind.State, "设备重启 · Normal Reset", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("TB_Startup_Enter", StringComparison.Ordinal) >= 0)
+        {
+            AddEvent(MainTraceEventKind.State, "设备启动 · TB_Startup_Enter", "设备日志", raw);
+            return;
+        }
+
+        if (text.IndexOf("enter powersave state", StringComparison.Ordinal) >= 0)
+        {
+            Match plan = Regex.Match(text,
+                @"this wakeup lasted (\d+(?:\.\d+)?)s, next wakeup at (\d{2}:\d{2}:\d{2})\(\+(\d{2}:\d{2}:\d{2})\)",
+                RegexOptions.CultureInvariant);
+            if (plan.Success)
+            {
+                _power = _power with
+                {
+                    SleepPrepareAt = now,
+                    SleepPrepareText = raw,
+                    LastWakeDurationSeconds = double.TryParse(plan.Groups[1].Value, NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out double lasted) ? (int)Math.Round(lasted) : null,
+                    NextWakeObservedAt = now,
+                    NextWakeDeviceTime = plan.Groups[2].Value,
+                    NextWakeWaitSeconds = ClockSeconds(plan.Groups[3].Value),
+                    NextWakeSource = "enter powersave state",
+                };
+                AddEvent(MainTraceEventKind.State, "系统省电计划 · 下次 " + plan.Groups[2].Value,
+                    "设备日志", raw);
+            }
+            else
+            {
+                _power = _power with { SleepPrepareAt = now, SleepPrepareText = raw };
+                AddEvent(MainTraceEventKind.State, "系统省电准备", "设备日志", raw);
+            }
+            return;
+        }
+        if (text.IndexOf("wakeup from powersave mode", StringComparison.Ordinal) >= 0)
+        {
+            _power = _power with
+            {
+                LastWakeAt = now,
+                LastWakeText = raw,
+                LastWakeSource = "未观测",
+                NextWakeObservedAt = null,
+                NextWakeDeviceTime = "",
+                NextWakeWaitSeconds = null,
+                NextWakeSource = "",
+            };
+            AddEvent(MainTraceEventKind.State, "系统唤醒 · 唤醒源未观测", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("powersave wakeup adjusted by ble force scan", StringComparison.Ordinal) >= 0)
+        {
+            AddEvent(MainTraceEventKind.State, "系统唤醒计划被 BLE 强扫调整", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("Enter standby with PA0 wakeup!", StringComparison.Ordinal) >= 0)
+        {
+            AddEvent(MainTraceEventKind.State, "进入 Standby · PA0 唤醒配置", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("mcu ble scan=", StringComparison.OrdinalIgnoreCase) >= 0
+            || text.IndexOf("soc ble scan=", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            ParseBlePolicy(text, now);
+            AddEvent(MainTraceEventKind.Sensor, "BLE 扫描参数已更新", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("ble_scan:", StringComparison.Ordinal) >= 0)
+        {
+            ParseBleScan(text, now);
+            AddEvent(MainTraceEventKind.Sensor, "BLE 扫描配置已更新", "设备日志", raw);
+            return;
+        }
+        if ((text.IndexOf("set mcu ble", StringComparison.OrdinalIgnoreCase) >= 0
+             || text.IndexOf("set soc ble", StringComparison.OrdinalIgnoreCase) >= 0
+             || text.IndexOf("sensor snapshot failed", StringComparison.OrdinalIgnoreCase) >= 0)
+            && text.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            _ble = _ble with { LastFailureText = Short(text, 160), FailureAt = now };
+            AddEvent(MainTraceEventKind.Alert, "BLE 配置失败 · " + Short(text, 110), "设备日志", raw, true);
+            return;
+        }
+        if (text.IndexOf("qhttp post OK", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            _qhttpOkCount++;
+            AddEvent(MainTraceEventKind.Camera, "HTTP 上传结果 · OK", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("qhttp post err", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            _qhttpErrCount++;
+            AddEvent(MainTraceEventKind.Alert, "HTTP 上传结果 · err", "设备日志", raw, true);
+            return;
+        }
+        if (text.IndexOf("mqtt client", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            if (text.IndexOf("connect retrying", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                _mqttRetryCount++;
+                AddEvent(MainTraceEventKind.Network, "MQTT 连接重试", "设备日志", raw);
+                return;
+            }
+            if (text.IndexOf("connect ok", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (_mqttDisconnected) _mqttReconnectCount++;
+                else _mqttConnectSuccessCount++;
+                _mqttDisconnected = false;
+                AddEvent(MainTraceEventKind.Network, "MQTT 连接成功", "设备日志", raw);
+                return;
+            }
+            if (text.IndexOf("connect failed", StringComparison.OrdinalIgnoreCase) >= 0
+                || text.IndexOf("disconnect", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                _mqttDisconnected = true;
+                AddEvent(MainTraceEventKind.Network, "MQTT 连接断开/失败", "设备日志", raw);
+                return;
+            }
+        }
+        if (text.IndexOf("exit power save failed", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            _power = _power with { ExitPowerFailAt = now, ExitPowerFailText = raw };
+            AddEvent(MainTraceEventKind.Alert, "退出省电失败", "设备日志", raw, true);
+            return;
+        }
+        if (text.IndexOf("Modem backoff delay", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            Match backoff = Regex.Match(text, @"Modem backoff delay (\d+) seconds", RegexOptions.IgnoreCase);
+            int? seconds = backoff.Success && int.TryParse(backoff.Groups[1].Value, out int value) ? value : null;
+            _power = _power with { BackoffAt = now, BackoffSeconds = seconds, BackoffText = raw };
+            AddEvent(MainTraceEventKind.Network,
+                "Modem 退避配置 " + (seconds is int n ? n + " 秒" : "未观测"), "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("blocking AT reentry", StringComparison.OrdinalIgnoreCase) >= 0
+            || text.IndexOf("blocking AT recv URC", StringComparison.OrdinalIgnoreCase) >= 0
+            || (text.IndexOf("mqtt_send publish delayed", StringComparison.OrdinalIgnoreCase) >= 0
+                && text.IndexOf("AT channel", StringComparison.OrdinalIgnoreCase) >= 0))
+        {
+            _power = _power with { AtBusyAt = now, AtBusyText = raw };
+            AddEvent(MainTraceEventKind.Network, "AT 通道忙 · 发布延迟", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("modem request to send consumed", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            AddEvent(MainTraceEventKind.Network, "Modem 请求被消费 · 等待标志快照", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("wakeup failed, reinit modem", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            _power = _power with { ExitPowerFailAt = now, ExitPowerFailText = raw };
+            AddEvent(MainTraceEventKind.Alert, "Modem 唤醒失败 · 重新初始化", "设备日志", raw, true);
+            return;
+        }
+
         if (text.IndexOf("BLE src=door_open", StringComparison.Ordinal) >= 0)
         {
+            UpdateDoorFromEvent(true, now, "门磁事件");
             AddEvent(MainTraceEventKind.Sensor, "门磁事件 · 门打开", "设备日志", raw);
             return;
         }
         if (text.IndexOf("BLE src=door_close", StringComparison.Ordinal) >= 0)
         {
+            UpdateDoorFromEvent(false, now, "门磁事件");
             AddEvent(MainTraceEventKind.Sensor, "门磁事件 · 门关闭", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("loading snapshot START pending", StringComparison.Ordinal) >= 0)
+        {
+            AddEvent(MainTraceEventKind.Camera, "拍照 START 等待 · " + Short(text, 90), "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("loading snapshot SoC powered off, waiting", StringComparison.Ordinal) >= 0)
+        {
+            AddEvent(MainTraceEventKind.Camera, "拍照等待 SoC 上电防抖", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("loading snapshot debounce done", StringComparison.Ordinal) >= 0)
+        {
+            AddEvent(MainTraceEventKind.Camera, "拍照防抖完成 · 发送 START", "设备日志", raw);
             return;
         }
         if (text.IndexOf("loading snapshot START", StringComparison.Ordinal) >= 0)
@@ -901,6 +1477,21 @@ internal sealed class MainTraceParser
         if (text.IndexOf("loading snapshot STOP", StringComparison.Ordinal) >= 0)
         {
             AddEvent(MainTraceEventKind.Camera, "拍照 STOP 入队", "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("received new pic file", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            AddEvent(MainTraceEventKind.Camera, "图片文件已收到 · " + Short(text, 100), "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("Picture to upload", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            AddEvent(MainTraceEventKind.Camera, "图片待上传 · " + Short(text, 100), "设备日志", raw);
+            return;
+        }
+        if (text.IndexOf("qhttp post file start", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            AddEvent(MainTraceEventKind.Camera, "HTTP 上传开始 · " + Short(text, 90), "设备日志", raw);
             return;
         }
         if (text.IndexOf("snapshot command received!", StringComparison.Ordinal) >= 0
@@ -989,6 +1580,7 @@ internal sealed class MainTraceParser
         }
         if (text.IndexOf("modem wakeup request", StringComparison.Ordinal) >= 0)
         {
+            _power = _power with { LastModemWakeAt = now, LastModemWakeText = raw };
             AddEvent(MainTraceEventKind.Network, "Modem 唤醒请求", "设备日志", raw);
             return;
         }
@@ -1008,8 +1600,9 @@ internal sealed class MainTraceParser
                     end - start - "encode report ok(".Length), NumberStyles.Integer,
                     CultureInfo.InvariantCulture, out bytes);
             string json = ExtractJson(text);
-            MainTraceReport report = BuildReport(now, tick, bytes, json);
+            MainTraceReport report = BuildReport(now, tick, bytes, json, raw);
             _reports.Insert(0, report);
+            _timelineReportTotal++;
             while (_reports.Count > MaxReports) _reports.RemoveAt(_reports.Count - 1);
             AddEvent(MainTraceEventKind.Report,
                 "编码 " + bytes + " B · JSON " + (report.JsonComplete ? "完整" : "未完整"),
@@ -1089,13 +1682,18 @@ internal sealed class MainTraceParser
             return;
         }
 
+        if (text.IndexOf("BLE Alarm Event queue full", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            AddEvent(MainTraceEventKind.Alert, "BLE 报警队列已满", "设备日志", raw, true);
+            return;
+        }
         if (LooksLikeError(text))
         {
             AddEvent(MainTraceEventKind.Alert, Short(text, 110), "设备日志", raw, true);
         }
     }
 
-    private MainTraceReport BuildReport(DateTime now, long tick, int bytes, string json)
+    private MainTraceReport BuildReport(DateTime now, long tick, int bytes, string json, string raw)
     {
         var report = new MainTraceReport
         {
@@ -1104,6 +1702,7 @@ internal sealed class MainTraceParser
             Bytes = bytes,
             PayloadJson = json,
             MaskedPayload = SanitizeRaw(json),
+            Raw = SanitizeRaw(raw),
         };
         if (json.Length == 0) return report;
         try
@@ -1132,6 +1731,8 @@ internal sealed class MainTraceParser
                 ThsText = FirstThs(Path(obj, "sensor", "thSensor")),
                 ThsList = ListText(Path(obj, "sensor", "thSensor")),
             };
+            List<MainTraceTpmsInfo> tpms = ParseTpms(Path(obj, "sensor", "bleTpms"), now);
+            if (tpms.Count > 0) _tpms = tpms;
         }
         catch (Exception)
         {
@@ -1199,10 +1800,9 @@ internal sealed class MainTraceParser
             DateTime when = report.BusinessSuccessAt ?? report.ApiAt ?? report.SubmittedAt ?? report.EncodedAt;
             string result = report.Outcome switch
             {
-                MainTraceReportOutcome.Success => "发布成功",
-                MainTraceReportOutcome.ApiReturned => "结果未观测",
-                MainTraceReportOutcome.Submitted => "已提交",
-                MainTraceReportOutcome.Failed => "失败",
+                MainTraceReportOutcome.Success or MainTraceReportOutcome.ApiReturned => "结果未关联",
+                MainTraceReportOutcome.Submitted => "已提交 · 结果未关联",
+                MainTraceReportOutcome.Failed => "失败日志 · 未关联",
                 MainTraceReportOutcome.Encoded => "已编码",
                 _ => "编码中",
             };
@@ -1210,9 +1810,9 @@ internal sealed class MainTraceParser
             string evidence = report.Outcome switch
             {
                 MainTraceReportOutcome.Success =>
-                    "gps payload pubilsh success · " + report.Topic + " · " + report.Bytes + " B",
+                    "MQTT 发布成功 / 固件收尾日志 · 未能唯一关联",
                 MainTraceReportOutcome.ApiReturned =>
-                    "API " + report.ApiResult + " · 业务成功日志未观测",
+                    "发布结果日志 · 未能唯一关联",
                 MainTraceReportOutcome.Failed => "publish failed · " + report.Failure,
                 MainTraceReportOutcome.Submitted =>
                     "mqtt publish enter ok · " + report.Topic,
@@ -1220,7 +1820,7 @@ internal sealed class MainTraceParser
                 _ => "encode report ok(" + report.Bytes + ")",
             };
             items.Add(new MainTraceTimelineItem(when, report.EncodedTick, MainTraceEventKind.Report,
-                "↑", text, "固件观察", evidence, false));
+                "↑", text, "固件观察", report.Raw.Length > 0 ? report.Raw : evidence, false));
         }
         foreach (MainTraceDownlink downlink in downlinks)
         {
@@ -1231,14 +1831,8 @@ internal sealed class MainTraceParser
         foreach (MainTraceEvent ev in events)
         {
             if (ev.Kind is MainTraceEventKind.Report or MainTraceEventKind.Downlink) continue;
-            // 报文阶段已合并为一条；常规 MQTT/模组翻转不刷时间线，保留配置和异常。
-            if (ev.Kind == MainTraceEventKind.Network
-                && ev.Text.IndexOf("配置写入", StringComparison.Ordinal) < 0) continue;
-            if (ev.Kind == MainTraceEventKind.State
-                && !ev.Text.StartsWith("主状态 ", StringComparison.Ordinal)
-                && !ev.Text.StartsWith("子状态 ", StringComparison.Ordinal)
-                && !ev.Text.StartsWith("收到首帧", StringComparison.Ordinal)) continue;
-            items.Add(new MainTraceTimelineItem(ev.Time, ev.Tick, ev.Kind, "", ev.Text, ev.Source, ev.Raw, ev.Alert));
+            bool diagnostic = IsDiagnosticEvent(ev);
+            items.Add(new MainTraceTimelineItem(ev.Time, ev.Tick, ev.Kind, "", ev.Text, ev.Source, ev.Raw, ev.Alert, diagnostic));
         }
         items.Sort((a, b) =>
         {
@@ -1248,12 +1842,60 @@ internal sealed class MainTraceParser
         return items.Count > MaxEvents ? items.GetRange(0, MaxEvents) : items;
     }
 
+    private static bool IsDiagnosticEvent(MainTraceEvent ev)
+    {
+        if (ev.Kind == MainTraceEventKind.State)
+        {
+            return !(ev.Text.StartsWith("主状态 ", StringComparison.Ordinal)
+                     || ev.Text.StartsWith("子状态 ", StringComparison.Ordinal)
+                     || ev.Text.StartsWith("系统", StringComparison.Ordinal)
+                     || ev.Text.StartsWith("GPS 电源", StringComparison.Ordinal)
+                     || ev.Text.StartsWith("GPS 有效定位", StringComparison.Ordinal)
+                     || ev.Text.StartsWith("设备重启", StringComparison.Ordinal)
+                     || ev.Text.StartsWith("设备启动", StringComparison.Ordinal));
+        }
+        if (ev.Kind == MainTraceEventKind.Network)
+        {
+            return !(ev.Text.IndexOf("配置写入", StringComparison.Ordinal) >= 0
+                     || ev.Text.IndexOf("MQTT 连接成功", StringComparison.Ordinal) >= 0
+                     || ev.Text.IndexOf("MQTT 连接断开", StringComparison.Ordinal) >= 0);
+        }
+        return false;
+    }
+
     private void AddEvent(MainTraceEventKind kind, string text, string source, string raw, bool alert = false)
     {
-        _events.Insert(0, new MainTraceEvent(DateTime.Now, Stopwatch.GetTimestamp(), kind,
-            Short(text, 180), source, Short(raw, 500), alert));
+        DateTime now = DateTime.Now;
+        long tick = Stopwatch.GetTimestamp();
+        string shortText = Short(text, 180);
+        string shortRaw = Short(raw, 500);
+        _events.Insert(0, new MainTraceEvent(now, tick, kind, shortText, source, shortRaw, alert));
         while (_events.Count > MaxEvents) _events.RemoveAt(_events.Count - 1);
         _eventTotal++;
+        switch (kind)
+        {
+            case MainTraceEventKind.State:
+                _timelineStateCount++;
+                break;
+            case MainTraceEventKind.Network:
+                _timelineNetworkCount++;
+                break;
+            case MainTraceEventKind.Sensor:
+                _timelineSensorCount++;
+                break;
+            case MainTraceEventKind.Alert:
+                _timelineAlertCount++;
+                break;
+            case MainTraceEventKind.Camera:
+                _timelineCameraCount++;
+                break;
+            case MainTraceEventKind.Local:
+                _timelineLocalCount++;
+                break;
+        }
+        if (alert)
+            _lastIncident = new MainTraceIncident(now, ModuleOf(shortRaw, source), SeverityOf(shortRaw),
+                Short(shortText, 120), shortRaw, source, _lastFix);
     }
 
     private List<string> BuildAlerts(MainTraceReport? last)
@@ -1427,6 +2069,102 @@ internal sealed class MainTraceParser
         return "";
     }
 
+    private static List<MainTraceTpmsInfo> ParseTpms(object? value, DateTime now)
+    {
+        var result = new List<MainTraceTpmsInfo>();
+        if (value is not object[] array) return result;
+        foreach (object? item in array)
+        {
+            if (item is not object[] fields || fields.Length < 6) continue;
+            string mac = Text(fields[0]);
+            if (mac.Length == 0) continue;
+            int? type = Number(fields[1]) is double typeValue ? (int)Math.Round(typeValue) : null;
+            double? pressure = Number(fields[2]);
+            double? temperature = Number(fields[3]) is double temp ? temp / 10.0 : null;
+            int? alarm = Number(fields[4]) is double alarmValue ? (int)Math.Round(alarmValue) : null;
+            int? power = Number(fields[5]) is double powerValue ? (int)Math.Round(powerValue) : null;
+            result.Add(new MainTraceTpmsInfo(mac, type, pressure, temperature, alarm, power, now, "上报 JSON"));
+        }
+        return result;
+    }
+
+    private static int? ClockSeconds(string value)
+    {
+        if (TimeSpan.TryParseExact(value, "hh\\:mm\\:ss", CultureInfo.InvariantCulture, out TimeSpan span))
+            return (int)Math.Round(span.TotalSeconds);
+        return null;
+    }
+
+    private void ParseBlePolicy(string text, DateTime now)
+    {
+        Match mcu = Regex.Match(text,
+            @"mcu ble scan=\d+.*?scan_interval=(\d+)(ms|s).*?scan_duration=(\d+)(ms|s)",
+            RegexOptions.CultureInvariant);
+        if (mcu.Success)
+        {
+            _ble = _ble with
+            {
+                McuIntervalText = mcu.Groups[1].Value + " " + mcu.Groups[2].Value,
+                McuDurationText = mcu.Groups[3].Value + " " + mcu.Groups[4].Value,
+                Source = "mcu ble scan",
+                McuSource = "mcu ble scan",
+                ObservedAt = now,
+            };
+        }
+        Match soc = Regex.Match(text,
+            @"soc ble scan=\d+.*?scan_interval=(\d+)(ms|s).*?scan_duration=(\d+)(ms|s)",
+            RegexOptions.CultureInvariant);
+        if (soc.Success)
+        {
+            _ble = _ble with
+            {
+                SocIntervalText = soc.Groups[1].Value + " " + soc.Groups[2].Value,
+                SocDurationText = soc.Groups[3].Value + " " + soc.Groups[4].Value,
+                SocUnitKnown = true,
+                Source = "soc ble scan",
+                SocSource = "soc ble scan",
+                ObservedAt = now,
+            };
+        }
+    }
+
+    private void ParseBleScan(string text, DateTime now)
+    {
+        Match match = Regex.Match(text,
+            @"mcu_ble=\[(\d+),(\d+)\](ms|s)?[\s\S]*?soc_ble=\[(\d+),(\d+)\](ms|s)?",
+            RegexOptions.CultureInvariant);
+        if (!match.Success) return;
+        string mcuUnit = match.Groups[3].Value;
+        string socUnit = match.Groups[6].Value;
+        string mcuInterval = match.Groups[1].Value + (mcuUnit.Length > 0 ? " " + mcuUnit : " · 单位未观测");
+        string mcuDuration = match.Groups[2].Value + (mcuUnit.Length > 0 ? " " + mcuUnit : " · 单位未观测");
+        string socInterval;
+        string socDuration;
+        bool socKnown = socUnit.Length > 0;
+        if (socKnown)
+        {
+            socInterval = match.Groups[4].Value + " " + socUnit;
+            socDuration = match.Groups[5].Value + " " + socUnit;
+        }
+        else
+        {
+            socInterval = match.Groups[4].Value + " / " + match.Groups[5].Value + " · 单位未观测";
+            socDuration = "";
+        }
+        _ble = _ble with
+        {
+            McuIntervalText = mcuInterval,
+            McuDurationText = mcuDuration,
+            SocIntervalText = socInterval,
+            SocDurationText = socDuration,
+            SocUnitKnown = socKnown,
+            Source = "Sensor info show",
+            McuSource = "Sensor info show",
+            SocSource = "Sensor info show",
+            ObservedAt = now,
+        };
+    }
+
     private static string ListText(object? value)
     {
         if (value is not object[] array) return "";
@@ -1491,7 +2229,7 @@ internal sealed class MainTraceParser
 
     private static string SanitizeRaw(string text)
     {
-        string clean = text.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+        string clean = text.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Replace("\0", "");
         clean = PwdPattern.Replace(clean, "\"pwd\":\"••••••\"");
         clean = IccidPattern.Replace(clean, match =>
         {
@@ -1522,6 +2260,12 @@ internal sealed class MainTraceParser
         string[] parts = content!.Split(',');
         for (int i = 0; i < parts.Length; i++) parts[i] = parts[i].Trim();
         return parts;
+    }
+
+    private static bool IsPlausibleState(string value)
+    {
+        if (value.Length == 0 || value.IndexOf('.') >= 0) return false;
+        return !double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
     }
 
     private static string[] Tokens(string? content)

@@ -352,7 +352,7 @@ public sealed partial class MainForm : Form
         get
         {
             Version? version = typeof(MainForm).Assembly.GetName().Version;
-            return version is null ? "1.7.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+            return version is null ? "1.8.0" : $"{version.Major}.{version.Minor}.{version.Build}";
         }
     }
 

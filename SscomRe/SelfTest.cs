@@ -1010,6 +1010,129 @@ internal static class SelfTest
             int before = mt.Snapshot().SnapshotCount;
             mt.Push(new byte[] { 0x00, 0x01, 0x02, 0x03 });
             CheckText("MT 二进制不产生快照", mt.Snapshot().SnapshotCount.ToString(), before.ToString());
+
+            var mtBad = new MainTraceParser();
+            string badModelSnapshot = "#19:07:31 GPS:[ON,2,0.5,22.70459,113.81207,0km/h,N,IDL,0m] "
+                + "MOD:[CHN-CT,EUTRAN,POWERSAVE,INQ_IP,2] BAT:[0,4.17V,0mA,100%,9787mAH,27.6C] "
+                + "DOOR:[CLOSE,0] MEM:32";
+            FeedMt(mtBad, snap1 + "\r\n" + badModelSnapshot + "\r\n" + snap1 + "\r\n");
+            MainTraceView badView = mtBad.Snapshot();
+            CheckText("MT 缺模型段快照不计状态", badView.Snapshot.MainState + "/" + badView.Snapshot.SubState, "WORKING/IDLE");
+            CheckText("MT 缺模型段快照计入失败", badView.MalformedSnapshots.ToString(), "1");
+            CheckText("MT 缺模型段不产生经纬度状态事件",
+                badView.Events.Any(e => e.Text.Contains("22.70459") || e.Text.Contains("113.81207")) ? "yes" : "no", "no");
+
+            var mtShort = new MainTraceParser();
+            FeedMt(mtShort, "#\r\n" + snap1 + "\r\n");
+            MainTraceView shortView = mtShort.Snapshot();
+            CheckText("MT 孤立 # 不崩溃", shortView.Snapshot.MainState, "WORKING");
+            CheckText("MT 孤立 # 计入失败", shortView.MalformedSnapshots.ToString(), "1");
+
+            var mtNumeric = new MainTraceParser();
+            string numericStateSnapshot = "#19:07:31 VS2310:[1.13.16,4.0.15,48MHz,22.70459,113.81207] "
+                + "MOD:[CHN-CT,EUTRAN,POWERSAVE,INQ_IP,2] BAT:[0,4.17V,0mA,100%,9787mAH,27.6C] "
+                + "DOOR:[CLOSE,0] MEM:32";
+            FeedMt(mtNumeric, snap1 + "\r\n" + numericStateSnapshot + "\r\n" + snap1 + "\r\n");
+            MainTraceView numericView = mtNumeric.Snapshot();
+            CheckText("MT 数值状态快照不计状态", numericView.Snapshot.MainState + "/" + numericView.Snapshot.SubState, "WORKING/IDLE");
+            CheckText("MT 数值状态快照计入失败", numericView.MalformedSnapshots.ToString(), "1");
+
+            CheckText("MT TPMS 原值解析",
+                view.Tpms.Count + "/" + view.Tpms[0].Type + "/" + view.Tpms[0].AlarmRaw, "1/4/4");
+            CheckText("MT 会话时钟格式",
+                System.Text.RegularExpressions.Regex.IsMatch(view.SessionClockText, @"^\d\d:\d\d:\d\d$") ? "yes" : "no", "yes");
+            CheckText("MT 时间线会话计数",
+                view.TimelineCounts.Report == view.Reports.Count + view.Downlinks.Count
+                && view.TimelineCounts.All >= view.Timeline.Count ? "yes" : "no", "yes");
+            CheckText("MT 时间线诊断事件", view.Timeline.Any(item => item.Diagnostic) ? "yes" : "no", "yes");
+
+            string noGps = snap1.Replace("GPS:[ON,2,0.5,22.70459,113.81208,0km/h,N,IDL,2m]",
+                "GPS:[OFF,0,0,,,0km/h,N,IDL,2m]");
+            var mtFix = new MainTraceParser();
+            FeedMt(mtFix, snap1 + "\r\n" + noGps + "\r\n");
+            CheckText("MT 最近定位保留", mtFix.Snapshot().Fix?.CoordinatesText ?? "none", "22.70459, 113.81208");
+
+            var mtIncident = new MainTraceParser();
+            string laterFix = snap1.Replace("#19:07:30", "#19:07:36")
+                .Replace("22.70459", "22.80000").Replace("113.81208", "113.90000");
+            FeedMt(mtIncident, snap1 + "\r\n" + snap2 + "\r\n" + laterFix + "\r\n");
+            MainTraceView incidentView = mtIncident.Snapshot();
+            CheckText("MT 异常参考定位冻结", incidentView.Incident?.ReferenceFix?.CoordinatesText ?? "none",
+                "22.70459, 113.81208");
+            CheckText("MT 最近定位已更新", incidentView.Fix?.CoordinatesText ?? "none",
+                "22.8, 113.9");
+
+            string doorOpen = snap1.Replace("DOOR:[CLO\r\nSE,2]", "DOOR:[OPEN,2]");
+            string doorClose = snap1.Replace("DOOR:[CLO\r\nSE,2]", "DOOR:[CLOSE,2]")
+                .Replace("#19:07:30", "#19:07:35");
+            var mtDoor = new MainTraceParser();
+            FeedMt(mtDoor, doorOpen + "\r\n" + doorClose + "\r\n");
+            MainTraceView doorView = mtDoor.Snapshot();
+            CheckText("MT 门磁观察区间", doorView.DoorOpenActive ? "active" : doorView.LastDoorDurationSeconds is int ? "closed" : "none", "closed");
+
+            var mtBle = new MainTraceParser();
+            FeedMt(mtBle, "[INFO] Sensor info show:\r\nble_scan: mcu_ble=[3600,300]s, soc_ble=[100,200]\r\n" + snap1 + "\r\n");
+            MainTraceView bleView = mtBle.Snapshot();
+            CheckText("MT BLE MCU 扫描参数", bleView.Ble.McuIntervalText + "/" + bleView.Ble.McuDurationText, "3600 s/300 s");
+            CheckText("MT BLE SoC 缺单位", bleView.Ble.SocIntervalText.Contains("单位未观测") ? "yes" : "no", "yes");
+
+            var mtPower = new MainTraceParser();
+            FeedMt(mtPower, "[INFO] enter powersave state, this wakeup lasted 12s, next wakeup at 19:12:00(+00:05:00)\r\n" + snap1 + "\r\n");
+            MainTraceView powerView = mtPower.Snapshot();
+            CheckText("MT 下次唤醒计划", powerView.Power.NextWakeDeviceTime + "/" + powerView.Power.NextWakeWaitSeconds,
+                "19:12:00/300");
+            CheckText("MT 本次唤醒持续", powerView.Power.LastWakeDurationSeconds?.ToString() ?? "none", "12");
+            FeedMt(mtPower, "[INFO] wakeup from powersave mode\r\n" + snap1 + "\r\n");
+            MainTraceView wokeView = mtPower.Snapshot();
+            CheckText("MT 观察到唤醒", wokeView.Power.LastWakeAt is null ? "no" : "yes", "yes");
+            CheckText("MT 唤醒后清除旧计划", wokeView.Power.NextWakeDeviceTime, "");
+
+            var mtWait = new MainTraceParser();
+            FeedMt(mtWait, "[INFO] Modem backoff delay 120 seconds\r\n" + snap1 + "\r\n");
+            CheckText("MT Modem 退避配置", mtWait.Snapshot().Power.BackoffSeconds?.ToString() ?? "none", "120");
+            FeedMt(mtWait, "[INFO] mqtt_send publish delayed: AT channel busy\r\n" + snap1 + "\r\n");
+            CheckText("MT AT 通道忙", mtWait.Snapshot().Power.AtBusyAt is null ? "no" : "yes", "yes");
+            FeedMt(mtWait, "[INFO] set soc ble scan timing ms failed\r\n" + snap1 + "\r\n");
+            MainTraceView waitView = mtWait.Snapshot();
+            CheckText("MT BLE 配置失败", waitView.Ble.LastFailureText.Contains("failed") ? "yes" : "no", "yes");
+            CheckText("MT BLE 失败进异常", waitView.Incident?.Summary.Contains("BLE 配置失败") == true ? "yes" : "no", "yes");
+
+            var mtLink = new MainTraceParser();
+            FeedMt(mtLink, "[INFO] qhttp post OK: file=a.jpg\r\n" + snap1 + "\r\n");
+            FeedMt(mtLink, "mqtt client 0 connect ok\r\n" + snap1 + "\r\n");
+            FeedMt(mtLink, "mqtt client 0 disconnect\r\n" + snap1 + "\r\n");
+            FeedMt(mtLink, "mqtt client 0 connect ok\r\n" + snap1 + "\r\n");
+            MainTraceView linkView = mtLink.Snapshot();
+            CheckText("MT QHTTP 结果计数", linkView.QhttpOkCount.ToString(), "1");
+            CheckText("MT MQTT 重连计数", linkView.MqttConnectSuccessCount + "/" + linkView.MqttReconnectCount, "1/1");
+
+            var mtArtifactPlan = new MainTraceParser();
+            FeedMt(mtArtifactPlan, ".\\Tracker\\TrackerBehavior.c(4344) enter powersave state, this wakeup lasted 950.140s, next wakeup at 23:53:05(+00:02:00)\r\n" + snap1 + "\r\n");
+            MainTraceView artifactPlanView = mtArtifactPlan.Snapshot();
+            CheckText("MT 小数唤醒时长", artifactPlanView.Power.LastWakeDurationSeconds?.ToString() ?? "none", "950");
+            CheckText("MT 下次唤醒计划(小数日志)", artifactPlanView.Power.NextWakeDeviceTime + "/" + artifactPlanView.Power.NextWakeWaitSeconds, "23:53:05/120");
+            FeedMt(mtArtifactPlan, "\\0.\\Tracker\\TrackerBehavior.c(4357) wakeup from powersave mode\r\n" + snap1 + "\r\n");
+            MainTraceView artifactWakeView = mtArtifactPlan.Snapshot();
+            CheckText("MT 唤醒日志带前缀", artifactWakeView.Power.LastWakeAt is null ? "no" : "yes", "yes");
+            CheckText("MT 唤醒后清计划", artifactWakeView.Power.NextWakeDeviceTime, "");
+
+            var mtBlePolicy = new MainTraceParser();
+            FeedMt(mtBlePolicy, "[INFO] .\\Tracker\\TrackerBehavior.c(1730) mcu ble scan=1 force=0 periodic_disable=0 scan_interval=3600s scan_duration=300s charging=0\r\n"
+                + "[INFO] .\\Tracker\\TrackerBehavior.c(1746) soc ble scan=1 force=0 periodic_disable=0 scan_interval=100ms scan_duration=200ms has_ths=1\r\n"
+                + snap1 + "\r\n");
+            MainTraceView policyView = mtBlePolicy.Snapshot();
+            CheckText("MT BLE 策略日志 MCU", policyView.Ble.McuIntervalText + "/" + policyView.Ble.McuDurationText, "3600 s/300 s");
+            CheckText("MT BLE 策略日志 SoC", policyView.Ble.SocIntervalText + "/" + policyView.Ble.SocDurationText, "100 ms/200 ms");
+            CheckText("MT BLE 策略来源分离", policyView.Ble.McuSource + "/" + policyView.Ble.SocSource, "mcu ble scan/soc ble scan");
+            var mtAt = new MainTraceParser();
+            FeedMt(mtAt, "[WARN] .\\..\\HAL\\HAL_Modem.c(5059) blocking AT recv URC: cmd=AT+QMTRECV=0,0\r\n" + snap1 + "\r\n");
+            CheckText("MT AT 阻塞 URC", mtAt.Snapshot().Power.AtBusyAt is null ? "no" : "yes", "yes");
+
+            var mtRestart = new MainTraceParser();
+            string noGpsAfter = snap1.Replace("GPS:[ON,2,0.5,22.70459,113.81208,0km/h,N,IDL,2m]",
+                "GPS:[OFF,0,0,,,0km/h,N,IDL,2m]");
+            FeedMt(mtRestart, snap1 + "\r\nSystem Restarting from \"Normal Reset\"...\r\n" + noGpsAfter + "\r\n");
+            CheckText("MT 重启清定位缓存", mtRestart.Snapshot().Fix?.CoordinatesText ?? "none", "none");
         }
 
         // —— 主窗体：接收区占大头，选项保持一行，发送框是矮条 ——
@@ -1657,6 +1780,18 @@ internal static class SelfTest
                     try { traceBitmap.Save(capture, System.Drawing.Imaging.ImageFormat.Png); } catch { /* 截图失败不影响自检 */ }
                 }
             }
+            form.MainTraceShowDiagnosticForTest();
+            using (Bitmap? diagBitmap = form.RenderMainTraceForTest())
+                CheckText("Trace 诊断视图可绘制", diagBitmap is { Width: > 0, Height: > 0 } ? "yes" : "no", "yes");
+            form.MainTraceToggleCategoryMenuForTest();
+            using (Bitmap? menuBitmap = form.RenderMainTraceForTest())
+                CheckText("Trace 类别菜单可绘制", menuBitmap is { Width: > 0, Height: > 0 } ? "yes" : "no", "yes");
+            using (Bitmap? summaryBitmap = form.RenderMainTracePopupForTest("summary"))
+                CheckText("Trace 会话摘要可绘制", summaryBitmap is { Width: > 0, Height: > 0 } ? "yes" : "no", "yes");
+            using (Bitmap? linkBitmap = form.RenderMainTracePopupForTest("link"))
+                CheckText("Trace 链路详情可绘制", linkBitmap is { Width: > 0, Height: > 0 } ? "yes" : "no", "yes");
+            using (Bitmap? periphBitmap = form.RenderMainTracePopupForTest("periph"))
+                CheckText("Trace 外设明细可绘制", periphBitmap is { Width: > 0, Height: > 0 } ? "yes" : "no", "yes");
             form.CloseMainTraceForTest();
             Application.DoEvents();
             CheckText("主日志可关闭", form.MainTraceOpenForTest ? "yes" : "no", "no");

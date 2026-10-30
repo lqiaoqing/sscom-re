@@ -16,9 +16,12 @@ public sealed partial class MainForm
         }
 
         _mainTraceEnabled = true;
+        _mainTrace.BeginSession();
         _mainTraceWindow = new MainTraceWindow(() => _mainTrace.Snapshot(), MainTraceSourceLabel);
         _mainTraceWindow.FormClosed += (_, _) =>
         {
+            _mainTraceEnabled = false;
+            _mainTrace.Reset();
             if (_mainTraceItem is not null) _mainTraceItem.Checked = false;
             _mainTraceWindow = null;
         };
@@ -68,6 +71,10 @@ public sealed partial class MainForm
     internal string MainTraceMessageStateForTest => _mainTraceWindow?.MessageStateForTest ?? "";
     internal string MainTraceSourceLabelForTest => MainTraceSourceLabel();
     internal Bitmap? RenderMainTraceForTest() => _mainTraceWindow?.RenderForTest();
+    internal Bitmap? RenderMainTracePopupForTest(string kind) =>
+        _mainTraceWindow is { } window ? MainTracePopups.RenderForTest(window, kind, window.ViewForTest) : null;
+    internal void MainTraceShowDiagnosticForTest() => _mainTraceWindow?.ShowDiagnosticForTest();
+    internal void MainTraceToggleCategoryMenuForTest() => _mainTraceWindow?.ToggleCategoryMenuForTest();
 
     internal void FeedMainTraceForTest(byte[] data)
     {

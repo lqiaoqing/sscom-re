@@ -55,6 +55,17 @@ internal static class MainTraceHarness
             Application.DoEvents();
             window.RefreshForTest();
             if (args.Contains("--down")) window.ShowDownForTest();
+            if (args.Contains("--diag")) window.ShowDiagnosticForTest();
+            if (args.Contains("--cat")) window.ToggleCategoryMenuForTest();
+            int popupAt = Array.IndexOf(args, "--popup");
+            if (popupAt >= 0 && popupAt + 1 < args.Length)
+            {
+                using Bitmap popup = MainTracePopups.RenderForTest(window, args[popupAt + 1], uiParser.Snapshot());
+                popup.Save(args[ui + 2], System.Drawing.Imaging.ImageFormat.Png);
+                window.Close();
+                Console.WriteLine("saved=" + args[ui + 2] + " size=" + popup.Width + "x" + popup.Height);
+                return 0;
+            }
             Application.DoEvents();
             using Bitmap bitmap = window.RenderForTest();
             bitmap.Save(args[ui + 2], System.Drawing.Imaging.ImageFormat.Png);
@@ -120,6 +131,7 @@ internal static class MainTraceHarness
                 Feed(parser, trim + "\r\n");
             }
         }
+        parser.FlushPendingForTest();
         return parser;
     }
 
